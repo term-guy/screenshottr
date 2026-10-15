@@ -44,6 +44,8 @@
   .tb:disabled { opacity: .35; cursor: default; background: transparent; }
   .tb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .tb.label { font-size: 12px; min-width: 52px; font-variant-numeric: tabular-nums; }
+  input.tb.label { width: 58px; text-align: center; cursor: text; outline: none; }
+  input.tb.label:focus { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--accent); }
   .spacer { flex: 1; }
   #dims { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
 
@@ -124,7 +126,7 @@
   #emptyRecent .libGrid { padding: 12px 0; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   #editor {
     position: absolute; display: none; margin: 0; border: 0; resize: none; overflow: hidden;
-    white-space: pre; outline: 1.5px dashed var(--accent); outline-offset: 3px; z-index: 5;
+    white-space: pre; overflow-wrap: anywhere; outline: 1.5px dashed var(--accent); outline-offset: 3px; z-index: 5;
     user-select: text; -webkit-user-select: text; caret-color: currentColor;
   }
   #editor::placeholder { color: currentColor; opacity: .45; }
@@ -183,6 +185,11 @@
   .rangeRow { display: flex; align-items: center; gap: 10px; }
   .rangeRow input { flex: 1; accent-color: var(--accent); }
   .val { min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
+  input.val {
+    flex: none; width: 52px; height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel-2); font: inherit; font-size: 12px; outline: none;
+  }
+  input.val:focus { border-color: var(--accent); }
   .seg { display: flex; background: var(--panel-2); border-radius: 8px; padding: 2px; gap: 2px; }
   .seg button {
     flex: 1; height: 28px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; color: var(--muted);
@@ -240,8 +247,10 @@
   <button class="tb" id="redoBtn" title="Redo (⇧⌘Z)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button>
   <div class="sep"></div>
   <button class="tb" id="zoomOut" title="Zoom out (⌘−)"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
-  <button class="tb label" id="zoomLabel" title="Fit to window (⌘0)">100%</button>
+  <input class="tb label" id="zoomLabel" title="Zoom level: type a percentage and press Enter" value="100%" spellcheck="false" autocomplete="off">
   <button class="tb" id="zoomIn" title="Zoom in (⌘+)"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
+  <button class="tb label" id="zoom1" title="Actual size, 100% (⌘1)">1:1</button>
+  <button class="tb label" id="zoomFit" title="Fit to window (⌘0)">Fit</button>
   <div class="spacer"></div>
   <span id="dims"></span>
   <button class="tb" id="libBtn" title="Recent images saved in this browser"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Recent</button>
@@ -342,11 +351,11 @@ const CTRL = {
   heads:     { label: 'Arrowheads', kind: 'seg', options: [['none', headIcon(0, 0)], ['start', headIcon(1, 0)], ['end', headIcon(0, 1)], ['both', headIcon(1, 1)]] },
   headStyle: { label: 'Head style', kind: 'seg', options: [['filled', 'Filled'], ['open', 'Open']] },
   dash:      { label: 'Line style', kind: 'seg', options: [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] },
-  opacity:   { label: 'Opacity', kind: 'range', min: 0.1, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + '%' },
+  opacity:   { label: 'Opacity', kind: 'range', min: 0.1, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + '%', parse: n => n / 100 },
   fillOn:    { label: 'Fill', kind: 'toggle' },
   fill:      { label: 'Fill color', kind: 'color', showIf: o => o.fillOn },
   radius:    { label: 'Corner radius', kind: 'range', min: 0, max: 40, step: 1, showIf: o => o.type !== 'text' || o.bgOn },
-  fontSize:  { label: 'Font size', kind: 'range', min: 8, max: 200, step: 1 },
+  fontSize:  { label: 'Font size', kind: 'range', min: 8, max: 200, step: 1, maxIn: 400 },
   fontFamily:{ label: 'Font', kind: 'select', options: [['system', 'Sans'], ['serif', 'Serif'], ['mono', 'Monospace'], ['hand', 'Handwritten']] },
   format:    { label: 'Style', kind: 'format' },
   outline:   { label: 'Outline', kind: 'toggle' },
@@ -405,13 +414,33 @@ function norm(o) {
 function fontOf(o, scale = 1) {
   return `${o.italic ? 'italic ' : ''}${o.bold ? 700 : 400} ${o.fontSize * scale}px ${FONTS[o.fontFamily] || FONTS.system}`;
 }
+// Text boxes size to their content, unless resized: then `wrapW` fixes the box
+// width and lines word-wrap to fit it.
 function textLayout(o, text = o.text) {
   mctx.font = fontOf(o);
-  const lines = (text || '').split('\n');
+  const paras = (text || '').split('\n');
+  const lines = o.wrapW ? paras.flatMap(p => wrapPara(p, o.wrapW - o.padding * 2)) : paras;
   const lh = o.fontSize * 1.25;
   let w = 0;
   for (const l of lines) w = Math.max(w, mctx.measureText(l).width);
-  return { lines, lh, w: w + o.padding * 2, h: lines.length * lh + o.padding * 2 };
+  return { lines, lh, w: o.wrapW || w + o.padding * 2, h: lines.length * lh + o.padding * 2 };
+}
+// Greedy word wrap with mctx's current font; words wider than the box break per character.
+function wrapPara(para, maxW) {
+  const fits = s => mctx.measureText(s.trimEnd()).width <= maxW;
+  const out = [];
+  let line = '';
+  for (const word of para.split(/(?<=\s)(?=\S)/)) {
+    if (line && !fits(line + word)) { out.push(line.trimEnd()); line = ''; }
+    if (!line && !fits(word)) {
+      for (const ch of word) {
+        if (line && !fits(line + ch)) { out.push(line); line = ''; }
+        line += ch;
+      }
+    } else line += word;
+  }
+  out.push(line.trimEnd());
+  return out;
 }
 function bbox(o) {
   switch (o.type) {
@@ -746,7 +775,7 @@ function openDoc(img, { frame: f, objects: objs = [], id, name, label }) {
   selId = null; hoverId = null;
   $('#empty').style.display = 'none';
   $('#box').style.display = 'block';
-  for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel']) $(b).disabled = false;
+  for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#zoom1', '#zoomFit']) $(b).disabled = false;
   rebuildPage();
   fit();
   resetFrameRect();
@@ -780,7 +809,7 @@ function setZoom(z) {
   zoom = clamp(z, 0.05, 8);
   cv.style.width = frame.w * zoom + 'px';
   cv.style.height = frame.h * zoom + 'px';
-  $('#zoomLabel').textContent = Math.round(zoom * 100) + '%';
+  $('#zoomLabel').value = Math.round(zoom * 100) + '%';
   if (editing) styleEditor();
   updateFrameBox();
   render();
@@ -797,10 +826,12 @@ function zoomAt(z, cx, cy) {
   stage.scrollLeft += r2.left + ix * zoom - cx;
   stage.scrollTop += r2.top + iy * zoom - cy;
 }
-function zoomStep(dir) {
+// Zoom around the center of the visible stage.
+function zoomTo(z) {
   const r = stage.getBoundingClientRect();
-  zoomAt(zoom * (dir > 0 ? 1.25 : 0.8), r.left + r.width / 2, r.top + r.height / 2);
+  zoomAt(z, r.left + r.width / 2, r.top + r.height / 2);
 }
+function zoomStep(dir) { zoomTo(zoom * (dir > 0 ? 1.25 : 0.8)); }
 function exportCanvas() {
   const c = document.createElement('canvas');
   c.width = frame.w; c.height = frame.h;
@@ -1184,8 +1215,10 @@ function styleEditor() {
 function sizeEditor() {
   const o = get(editing.id);
   const L = textLayout(o, ta.value || 'Type…');
-  ta.style.width = L.w * zoom + o.fontSize * zoom * 0.6 + 'px';
+  ta.style.whiteSpace = o.wrapW ? 'pre-wrap' : 'pre';
+  ta.style.width = (o.wrapW ? L.w * zoom : L.w * zoom + o.fontSize * zoom * 0.6) + 'px';
   ta.style.height = L.h * zoom + 'px';
+  if (ta.scrollHeight > ta.clientHeight) ta.style.height = ta.scrollHeight + 'px';
 }
 function commitEdit() {
   if (!editing) return;
@@ -1232,6 +1265,9 @@ function newObj(type, extra) {
 }
 cv.addEventListener('mousedown', e => e.preventDefault()); // don't steal focus from the text editor
 cv.addEventListener('pointerdown', e => {
+  // Canvas clicks don't move focus (see mousedown above), so apply any typed panel/zoom value
+  // now, while it still targets the current selection.
+  if (document.activeElement?.tagName === 'INPUT') document.activeElement.blur();
   if (!base || e.button !== 0) return;
   const wasEditing = !!editing;
   commitEdit();
@@ -1306,9 +1342,7 @@ function applyHandle(o, a, k, p, shift) {
   if (k === 'p1') { const q = shift ? snapAngle(a.x2, a.y2, p.x, p.y) : p; o.x1 = q.x; o.y1 = q.y; return; }
   if (k === 'p2') { const q = shift ? snapAngle(a.x1, a.y1, p.x, p.y) : p; o.x2 = q.x; o.y2 = q.y; return; }
   if (o.type === 'text') {
-    const L = textLayout(a);
-    const textW = Math.max(1, L.w - a.padding * 2);
-    o.fontSize = clamp(Math.round(a.fontSize * (p.x - a.x - a.padding * 2) / textW), 6, 400);
+    o.wrapW = Math.round(Math.max(p.x - a.x, a.padding * 2 + a.fontSize));
     return;
   }
   const b = norm(a);
@@ -1411,9 +1445,24 @@ function buildControl(key, t) {
       const min = d.minFor && t.type in d.minFor ? d.minFor[t.type] : d.min;
       Object.assign(inp, { type: 'range', min, max: d.max, step: d.step });
       inp.value = t[key];
-      const out = el('span', 'val', fmt(t[key]));
-      inp.oninput = () => { out.textContent = fmt(+inp.value); setProp(key, +inp.value, false); };
+      // Editable value box: type a number and press Enter (or leave the field) to apply.
+      const out = el('input', 'val');
+      Object.assign(out, { type: 'text', value: fmt(t[key]), spellcheck: false, autocomplete: 'off' });
+      inp.oninput = () => { out.value = fmt(+inp.value); setProp(key, +inp.value, false); };
       inp.onchange = () => setProp(key, +inp.value, true);
+      const applyTyped = () => {
+        const n = parseFloat(out.value);
+        if (!isFinite(n)) { out.value = fmt(+inp.value); return; }
+        const v = clamp(d.parse ? d.parse(n) : n, +min, d.maxIn ?? d.max);
+        inp.value = v; out.value = fmt(v);
+        if (v !== t[key]) setProp(key, v, true);
+      };
+      out.onfocus = () => out.select();
+      out.onblur = applyTyped;
+      out.onkeydown = e => {
+        if (e.key === 'Enter') { e.preventDefault(); out.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); out.value = fmt(+inp.value); out.blur(); }
+      };
       wrap.append(inp, out);
       row.append(wrap);
       break;
@@ -1515,6 +1564,11 @@ function refreshPanel() {
     const a = el('div', 'actions');
     const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
     if (o.type === 'text') mk('Edit text', () => startEdit(o, false));
+    if (o.type === 'text' && o.wrapW) mk('Auto width', () => {
+      delete o.wrapW;
+      pushHistory('Text: auto width');
+      refreshPanel(); render();
+    });
     mk('Duplicate', duplicate);
     mk('Bring to front', () => reorder(1));
     mk('Send to back', () => reorder(-1));
@@ -1534,16 +1588,48 @@ function del() {
   pushHistory('Delete ' + NAMES[o.type].toLowerCase());
   refreshPanel(); render();
 }
+// Add a copy of `src` (from this or another document) shifted by `off`, and select it.
+function insertCopy(src, off, label) {
+  const c = clone(src);
+  c.id = nextId++;
+  if (c.type === 'step') c.n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
+  if ('x1' in c) { c.x1 += off; c.y1 += off; c.x2 += off; c.y2 += off; } else { c.x += off; c.y += off; }
+  objects.push(c); selId = c.id;
+  pushHistory(label + ' ' + NAMES[c.type].toLowerCase());
+  selectMode(); render();
+}
 function duplicate() {
   const o = sel();
   if (!o) return;
   commitEdit();
-  const c = clone(o), off = 20;
-  c.id = nextId++;
-  if ('x1' in c) { c.x1 += off; c.y1 += off; c.x2 += off; c.y2 += off; } else { c.x += off; c.y += off; }
-  objects.push(c); selId = c.id;
-  pushHistory('Duplicate ' + NAMES[c.type].toLowerCase());
-  refreshPanel(); render();
+  insertCopy(o, 20, 'Duplicate');
+}
+
+// ---------- copy / paste annotations ----------
+// The system clipboard gets plain text (the text itself for text objects, a JSON
+// payload otherwise) so a paste can recognise what we copied, even in another tab.
+const CLIP_KEY = 'screenshottr/object';
+let objClip = null;      // { obj, text, pastes }
+function copyObject(o) {
+  commitEdit();
+  const obj = clone(o);
+  const text = o.type === 'text' ? o.text : JSON.stringify({ [CLIP_KEY]: obj });
+  objClip = { obj, text, pastes: 0 };
+  navigator.clipboard?.writeText(text).catch(() => {});
+  toast('Copied ' + NAMES[o.type].toLowerCase());
+}
+function clipObjectFrom(text) {
+  if (objClip && text === objClip.text) return objClip;
+  if (!text || text[0] !== '{') return null;
+  try {
+    const obj = JSON.parse(text)[CLIP_KEY];
+    if (obj && NAMES[obj.type] && obj.type !== 'canvas') return objClip = { obj, text, pastes: 0 };
+  } catch (e) {}
+  return null;
+}
+function pasteObject(clip) {
+  clip.pastes++;
+  insertCopy(clip.obj, 20 * clip.pastes, 'Paste');
 }
 function reorder(dir) {
   const o = sel();
@@ -1585,7 +1671,24 @@ $('#undoBtn').onclick = undo;
 $('#redoBtn').onclick = redo;
 $('#zoomIn').onclick = () => zoomStep(1);
 $('#zoomOut').onclick = () => zoomStep(-1);
-$('#zoomLabel').onclick = fit;
+$('#zoom1').onclick = () => zoomTo(1);
+$('#zoomFit').onclick = fit;
+{
+  const zi = $('#zoomLabel');
+  zi.onfocus = () => zi.select();
+  zi.onblur = () => { zi.value = Math.round(zoom * 100) + '%'; };
+  zi.onkeydown = e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const n = parseFloat(zi.value);
+      if (n > 0) zoomTo(n / 100);
+      zi.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      zi.blur();
+    }
+  };
+}
 $('#copyBtn').onclick = copyImage;
 $('#saveBtn').onclick = saveImage;
 $('#projBtn').onclick = saveProject;
@@ -1604,7 +1707,7 @@ $('#emptyBlank').onclick = () => {
   c.width = 1600; c.height = 1000;
   openDoc(c, { name: 'Blank canvas', label: 'Blank canvas' });
 };
-for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel']) $(b).disabled = true;
+for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#zoom1', '#zoomFit']) $(b).disabled = true;
 
 document.addEventListener('paste', e => {
   if (editing || e.target.closest?.('input, textarea, select')) return;
@@ -1612,6 +1715,8 @@ document.addEventListener('paste', e => {
   const img = items.find(it => it.type.startsWith('image/'));
   if (img) { e.preventDefault(); loadFile(img.getAsFile()); return; }
   const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  const clip = base && clipObjectFrom(text);
+  if (clip) { e.preventDefault(); pasteObject(clip); return; }
   if (text && base) {
     e.preventDefault();
     const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
@@ -1657,13 +1762,16 @@ document.addEventListener('keydown', e => {
   if (mod && k === 's') { e.preventDefault(); e.shiftKey ? saveProject() : saveImage(); return; }
   if (mod && k === 'c') {
     if (String(window.getSelection())) return;
-    e.preventDefault(); copyImage(); return;
+    e.preventDefault();
+    const o = sel();
+    o ? copyObject(o) : copyImage();
+    return;
   }
   if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
   if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); return; }
   if (mod && k === '-') { e.preventDefault(); zoomStep(-1); return; }
   if (mod && k === '0') { e.preventDefault(); fit(); return; }
-  if (mod && k === '1') { e.preventDefault(); setZoom(1); return; }
+  if (mod && k === '1') { e.preventDefault(); zoomTo(1); return; }
   if (mod || e.altKey) return;
 
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return; }

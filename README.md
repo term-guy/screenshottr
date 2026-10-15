@@ -8,8 +8,11 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
-- **Text styling**: font, size, outline, background, padding, and corner radius
+- **Text styling**: font, size, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
+- **Precise values**: every slider (font size, opacity, weight…) has a box you can type a value into
 - **Canvas resize**: crop or extend the canvas with drag handles and anchor control
+- **Copy / paste annotations**: `⌘C` copies the selected annotation with its text, color and style; `⌘V` pastes it (also across tabs)
+- **Zoom**: type an exact zoom level, jump to 1:1, or fit to window
 - **Undo / redo** with full history
 - **Export**: copy to clipboard, save as PNG, or save an editable `.sshot` project file
 - **Recent images**: a local library of past work, stored in your browser (IndexedDB)
@@ -42,12 +45,16 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Redact | `P` |
 | Resize canvas | `C` |
 | Open image or project | `⌘O` |
-| Copy image to clipboard | `⌘C` |
+| Copy selected annotation | `⌘C` |
+| Paste annotation | `⌘V` |
+| Copy image to clipboard (nothing selected) | `⌘C` |
 | Export PNG | `⌘S` |
 | Save `.sshot` project | `⇧⌘S` |
 | Undo / Redo | `⌘Z` / `⇧⌘Z` |
 | Zoom in / out | `⌘+` / `⌘−` |
+| Actual size (100%) | `⌘1` |
 | Fit to window | `⌘0` |
+| Set exact zoom | Click the zoom %, type a value, `Enter` |
 | Delete selection | `Delete` / `Backspace` |
 | Send backward / bring forward | `[` / `]` |
 | Nudge selection (×10 with `⇧`) | Arrow keys |

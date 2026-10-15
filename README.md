@@ -52,6 +52,8 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Save `.sshot` project | `⇧⌘S` |
 | Undo / Redo | `⌘Z` / `⇧⌘Z` |
 | Zoom in / out | `⌘+` / `⌘−` |
+| Zoom at pointer | Mouse wheel or trackpad pinch |
+| Pan | Middle-click and drag |
 | Actual size (100%) | `⌘1` |
 | Fit to window | `⌘0` |
 | Set exact zoom | Click the zoom %, type a value, `Enter` |

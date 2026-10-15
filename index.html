@@ -141,6 +141,7 @@
     transition: border-color .15s, background .15s;
   }
   body.dragging .drop { border-color: var(--accent); background: var(--accent-soft); }
+  body.panning, body.panning * { cursor: grabbing !important; }
   .drop h2 { margin: 0 0 6px; font-size: 20px; }
   .drop p { margin: 0 0 20px; color: var(--muted); }
   kbd {
@@ -1735,11 +1736,34 @@ window.addEventListener('drop', e => {
   const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/') || /\.(sshot|json)$/i.test(f.name));
   if (f) { closeLibrary(); loadFile(f); }
 });
+// Wheel zooms around the pointer. Trackpad pinch arrives as ctrl+wheel with small deltas;
+// a mouse wheel notch is ~100px (or a few lines), so it is capped to one gentle step.
 stage.addEventListener('wheel', e => {
-  if (!base || !(e.ctrlKey || e.metaKey)) return;
+  if (!base) return;
   e.preventDefault();
-  zoomAt(zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+  const pinch = e.ctrlKey || e.metaKey;
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  zoomAt(zoom * Math.exp(pinch ? -dy * 0.01 : -clamp(dy, -100, 100) * 0.0025), e.clientX, e.clientY);
 }, { passive: false });
+
+// Middle-button drag pans the stage.
+let pan = null;
+stage.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); }); // no autoscroll
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 1 || !base) return;
+  e.preventDefault();
+  pan = { x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop };
+  stage.setPointerCapture(e.pointerId);
+  document.body.classList.add('panning');
+});
+stage.addEventListener('pointermove', e => {
+  if (!pan) return;
+  stage.scrollLeft = pan.sl - (e.clientX - pan.x);
+  stage.scrollTop = pan.st - (e.clientY - pan.y);
+});
+const endPan = () => { pan = null; document.body.classList.remove('panning'); };
+stage.addEventListener('pointerup', endPan);
+stage.addEventListener('pointercancel', endPan);
 
 const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', n: 'step', p: 'redact', c: 'canvas' };
 document.addEventListener('keydown', e => {

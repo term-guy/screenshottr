@@ -8,7 +8,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
-- **Text styling**: font, size, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
+- **Text styling**: font, size, left / center / right alignment, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
 - **Precise values**: every slider (font size, opacity, weight…) has a box you can type a value into
 - **Canvas resize**: crop or extend the canvas with drag handles and anchor control
 - **Copy / paste annotations**: `⌘C` copies the selected annotation with its text, color and style; `⌘V` pastes it (also across tabs)

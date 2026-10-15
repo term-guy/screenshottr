@@ -332,7 +332,7 @@ const DEFAULTS = {
   rect:    { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', radius: 6, dash: 'solid', opacity: 1 },
   ellipse: { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', dash: 'solid', opacity: 1 },
   text:    { color: '#ffffff', fontSize: 28, fontFamily: 'system', bold: true, italic: false, underline: false, strike: false,
-             outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
+             align: 'left', outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
   step:    { color: '#ff3b30', textColor: '#ffffff', size: 40, opacity: 1 },
   redact:  { mode: 'pixelate', strength: 12 },
 };
@@ -341,10 +341,11 @@ const PROPS = {
   line:    ['color', 'width', 'dash', 'opacity'],
   rect:    ['color', 'width', 'dash', 'radius', 'fillOn', 'fill', 'opacity'],
   ellipse: ['color', 'width', 'dash', 'fillOn', 'fill', 'opacity'],
-  text:    ['color', 'fontSize', 'fontFamily', 'format', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
+  text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
   step:    ['n', 'color', 'textColor', 'size', 'opacity'],
   redact:  ['mode', 'strength'],
 };
+const alignIcon = a => `<svg viewBox="0 0 22 14"><path d="M3 2h16M${[3, 6, 9][a]} 7h10M${[3, 4.5, 6][a]} 12h13"/></svg>`;
 const headIcon = (l, r) => `<svg viewBox="0 0 22 14"><path d="M3 7h16"/>${l ? '<path d="M7 3L3 7l4 4"/>' : ''}${r ? '<path d="M15 3l4 4-4 4"/>' : ''}</svg>`;
 const CTRL = {
   color:     { label: 'Color', kind: 'color' },
@@ -359,6 +360,7 @@ const CTRL = {
   fontSize:  { label: 'Font size', kind: 'range', min: 8, max: 200, step: 1, maxIn: 400 },
   fontFamily:{ label: 'Font', kind: 'select', options: [['system', 'Sans'], ['serif', 'Serif'], ['mono', 'Monospace'], ['hand', 'Handwritten']] },
   format:    { label: 'Style', kind: 'format' },
+  align:     { label: 'Align', kind: 'seg', def: 'left', options: [['left', alignIcon(0)], ['center', alignIcon(1)], ['right', alignIcon(2)]] },
   outline:   { label: 'Outline', kind: 'toggle' },
   bgOn:      { label: 'Background', kind: 'toggle' },
   bgColor:   { label: 'Background color', kind: 'color', showIf: o => o.bgOn },
@@ -577,8 +579,10 @@ function drawText(c, o) {
   c.textBaseline = 'middle';
   c.textAlign = 'left';
   const th = Math.max(1, o.fontSize / 14);
+  const cw = L.w - o.padding * 2, shift = { center: 0.5, right: 1 }[o.align] || 0;
   L.lines.forEach((ln, i) => {
-    const tx = o.x + o.padding, cy = o.y + o.padding + i * L.lh + L.lh / 2;
+    const lw = c.measureText(ln).width;
+    const tx = o.x + o.padding + (cw - lw) * shift, cy = o.y + o.padding + i * L.lh + L.lh / 2;
     if (o.outline) {
       c.lineWidth = Math.max(2, o.fontSize / 6); c.lineJoin = 'round';
       c.strokeStyle = contrast(o.color);
@@ -586,7 +590,6 @@ function drawText(c, o) {
     }
     c.fillStyle = o.color;
     c.fillText(ln, tx, cy);
-    const lw = c.measureText(ln).width;
     if (o.underline) c.fillRect(tx, cy + o.fontSize * 0.4, lw, th);
     if (o.strike) c.fillRect(tx, cy - th / 2 + o.fontSize * 0.04, lw, th);
   });
@@ -1204,6 +1207,7 @@ function styleEditor() {
   s.font = fontOf(o, z);
   s.lineHeight = o.fontSize * 1.25 * z + 'px';
   s.padding = o.padding * z + 'px';
+  s.textAlign = o.align || 'left';
   s.color = o.color;
   s.background = o.bgOn ? o.bgColor : 'transparent';
   s.borderRadius = (o.bgOn ? o.radius * z : 0) + 'px';
@@ -1217,7 +1221,8 @@ function sizeEditor() {
   const o = get(editing.id);
   const L = textLayout(o, ta.value || 'Type…');
   ta.style.whiteSpace = o.wrapW ? 'pre-wrap' : 'pre';
-  ta.style.width = (o.wrapW ? L.w * zoom : L.w * zoom + o.fontSize * zoom * 0.6) + 'px';
+  const caretRoom = o.wrapW || (o.align && o.align !== 'left') ? 0 : o.fontSize * 0.6; // keeps aligned text in place
+  ta.style.width = (L.w + caretRoom) * zoom + 'px';
   ta.style.height = L.h * zoom + 'px';
   if (ta.scrollHeight > ta.clientHeight) ta.style.height = ta.scrollHeight + 'px';
 }
@@ -1471,7 +1476,7 @@ function buildControl(key, t) {
     case 'seg': {
       const wrap = el('div', 'seg');
       for (const [v, label] of d.options) {
-        const b = el('button', t[key] === v ? 'on' : '');
+        const b = el('button', (t[key] ?? d.def) === v ? 'on' : '');
         b.innerHTML = label; b.title = v;
         b.onclick = () => { setProp(key, v, true); refreshPanel(); };
         wrap.append(b);

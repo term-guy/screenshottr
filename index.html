@@ -1,0 +1,1696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screenshottr</title>
+<style>
+  :root {
+    --bg: #16171a;
+    --stage: #1e2024;
+    --panel: #212327;
+    --panel-2: #2a2d32;
+    --line: #34373d;
+    --text: #e8e9eb;
+    --muted: #8d9199;
+    --accent: #4c8dff;
+    --accent-soft: rgba(76, 141, 255, .16);
+    --danger: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: grid; grid-template-rows: 48px 1fr; overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+  }
+  button { font: inherit; color: inherit; }
+
+  /* ---------- toolbar ---------- */
+  header {
+    display: flex; align-items: center; gap: 4px; padding: 0 10px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 700; letter-spacing: .2px; margin-right: 10px; display: flex; align-items: center; gap: 8px; }
+  .brand i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #ff3b30, #ff9f0a); display: inline-block; }
+  .sep { width: 1px; height: 24px; background: var(--line); margin: 0 6px; }
+  .tb {
+    height: 34px; min-width: 34px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: var(--text);
+  }
+  .tb:hover { background: var(--panel-2); }
+  .tb.on { background: var(--accent-soft); color: var(--accent); }
+  .tb:disabled { opacity: .35; cursor: default; background: transparent; }
+  .tb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tb.label { font-size: 12px; min-width: 52px; font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+  #dims { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+
+  /* ---------- layout ---------- */
+  main { display: grid; grid-template-columns: 1fr 268px; min-height: 0; }
+  #stage { position: relative; overflow: auto; background: var(--stage); min-width: 0; }
+  #wrap {
+    display: grid; place-items: center; min-width: 100%; min-height: 100%;
+    width: max-content; height: max-content; padding: 40px;
+  }
+  #box { position: relative; display: none; }
+  #cv {
+    display: block; position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0,0,0,.45); touch-action: none;
+    background: repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+  }
+  .checker { background: repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+
+  /* canvas resize frame */
+  #frameBg { position: absolute; z-index: 0; display: none; }
+  #frameBox {
+    position: absolute; z-index: 4; display: none; pointer-events: none;
+    outline: 1.5px dashed var(--accent); box-shadow: 0 0 0 100000px rgba(0,0,0,.5);
+  }
+  #frameBox i {
+    position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; background: #fff; border: 2px solid var(--accent);
+    border-radius: 3px; pointer-events: auto; touch-action: none;
+  }
+  #frameBox i[data-k=nw] { left: 0; top: 0; cursor: nwse-resize; }
+  #frameBox i[data-k=n]  { left: 50%; top: 0; cursor: ns-resize; }
+  #frameBox i[data-k=ne] { left: 100%; top: 0; cursor: nesw-resize; }
+  #frameBox i[data-k=e]  { left: 100%; top: 50%; cursor: ew-resize; }
+  #frameBox i[data-k=se] { left: 100%; top: 100%; cursor: nwse-resize; }
+  #frameBox i[data-k=s]  { left: 50%; top: 100%; cursor: ns-resize; }
+  #frameBox i[data-k=sw] { left: 0; top: 100%; cursor: nesw-resize; }
+  #frameBox i[data-k=w]  { left: 0; top: 50%; cursor: ew-resize; }
+  #frameLabel {
+    position: absolute; left: 50%; top: -30px; transform: translateX(-50%); white-space: nowrap;
+    background: #000d; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 5px; font-variant-numeric: tabular-nums;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid2 .lab { margin-bottom: 4px; }
+  .sizeRow { display: flex; gap: 12px; align-items: flex-end; }
+  .anchor { display: grid; grid-template-columns: repeat(3, 20px); gap: 3px; }
+  .anchor button { width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); cursor: pointer; }
+  .anchor button.on { background: var(--accent); border-color: var(--accent); }
+
+  /* library */
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 40; display: grid; place-items: center; padding: 24px; }
+  .modal[hidden] { display: none; }
+  .sheet {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: min(980px, 100%); max-height: 100%;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .sheetHead { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .sheetHead h2 { margin: 0; font-size: 15px; }
+  .sheetHead .spacer { flex: 1; }
+  .libGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 16px; overflow: auto; }
+  .card {
+    position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer; background: var(--panel-2);
+    text-align: left;
+  }
+  .card:hover { border-color: #555a63; }
+  .card.cur { border-color: var(--accent); }
+  .card .thumb { height: 120px; display: grid; place-items: center; overflow: hidden; }
+  .card .thumb img { max-width: 100%; max-height: 120px; display: block; }
+  .card .meta { padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .card .meta b { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .meta span { font-size: 11px; color: var(--muted); }
+  .card .x {
+    position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 6px; border: 0; background: #000a; color: #fff;
+    cursor: pointer; opacity: 0; font-size: 15px; line-height: 1;
+  }
+  .card:hover .x { opacity: 1; }
+  .card .x:hover { background: var(--danger); }
+  .libEmpty { color: var(--muted); padding: 24px 16px; }
+  #emptyRecent { width: min(900px, 100%); margin-top: 28px; }
+  #emptyRecent h3 { margin: 0 4px 0; }
+  #emptyRecent .libGrid { padding: 12px 0; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  #editor {
+    position: absolute; display: none; margin: 0; border: 0; resize: none; overflow: hidden;
+    white-space: pre; outline: 1.5px dashed var(--accent); outline-offset: 3px; z-index: 5;
+    user-select: text; -webkit-user-select: text; caret-color: currentColor;
+  }
+  #editor::placeholder { color: currentColor; opacity: .45; }
+
+  #empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding: 48px 24px; overflow: auto;
+  }
+  #empty .drop { margin-top: auto; }
+  #empty::after { content: ""; margin-bottom: auto; }
+  .drop {
+    border: 2px dashed var(--line); border-radius: 16px; padding: 44px 48px; text-align: center; max-width: 460px;
+    transition: border-color .15s, background .15s;
+  }
+  body.dragging .drop { border-color: var(--accent); background: var(--accent-soft); }
+  .drop h2 { margin: 0 0 6px; font-size: 20px; }
+  .drop p { margin: 0 0 20px; color: var(--muted); }
+  kbd {
+    font: 600 11px ui-monospace, Menlo, monospace; padding: 2px 6px; border-radius: 5px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--text);
+  }
+  .btn {
+    height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2);
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: #4a4e56; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ---------- panel ---------- */
+  #panel {
+    background: var(--panel); border-left: 1px solid var(--line);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  #propsSec { padding: 14px 14px 10px; overflow: auto; flex: 0 1 auto; max-height: 68%; border-bottom: 1px solid var(--line); }
+  #histSec { padding: 12px 14px; display: flex; flex-direction: column; min-height: 120px; flex: 1; }
+  h3 {
+    margin: 0 0 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  .row { margin-bottom: 12px; }
+  .lab { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .rowInline { display: flex; align-items: center; justify-content: space-between; }
+  .rowInline .lab { margin: 0; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sw {
+    width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; padding: 0; cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+  }
+  .sw.on { border-color: var(--text); }
+  input[type=color] {
+    width: 26px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 50%;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type=color]::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 50%; }
+  input[type=color]::-moz-color-swatch { border: 1px solid var(--line); border-radius: 50%; }
+  .rangeRow { display: flex; align-items: center; gap: 10px; }
+  .rangeRow input { flex: 1; accent-color: var(--accent); }
+  .val { min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); font-size: 12px; }
+  .seg { display: flex; background: var(--panel-2); border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg button {
+    flex: 1; height: 28px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; color: var(--muted);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: #3a3e45; color: var(--text); }
+  .seg svg { width: 22px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .switch {
+    width: 36px; height: 20px; border-radius: 10px; border: 0; background: #464a52; position: relative; cursor: pointer; padding: 0;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .12s;
+  }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 18px; }
+  select, input[type=number] {
+    width: 100%; height: 30px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 0 8px; font: inherit;
+  }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+  .actions .btn { height: 30px; justify-content: center; font-size: 12px; padding: 0 8px; }
+  .actions .btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+  #hist { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+  #hist li {
+    padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; font-size: 12px;
+  }
+  #hist li:hover { background: var(--panel-2); }
+  #hist li .n { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 18px; font-size: 11px; }
+  #hist li.cur { background: var(--accent-soft); color: var(--accent); }
+  #hist li.future { opacity: .4; }
+  .muted { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+    background: #000c; color: #fff; padding: 9px 16px; border-radius: 9px; transition: opacity .2s, transform .2s; z-index: 50;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><i></i>Screenshottr</div>
+  <button class="tb tool" data-tool="select" title="Select / move (V)"><svg viewBox="0 0 24 24"><path d="M5 3l13 7.5-5.5 1.8L10 18z"/></svg></button>
+  <button class="tb tool" data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></button>
+  <button class="tb tool" data-tool="line" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
+  <button class="tb tool" data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
+  <button class="tb tool" data-tool="ellipse" title="Ellipse (E)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button>
+  <button class="tb tool" data-tool="text" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
+  <button class="tb tool" data-tool="step" title="Numbered step (N)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10.5 9.5L12.5 8v8"/></svg></button>
+  <button class="tb tool" data-tool="redact" title="Redact: pixelate / blur / solid (P)"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/><path d="M4 4h8v8H4zM12 12h8v8h-8z" fill="currentColor" stroke="none" opacity=".45"/></svg></button>
+  <button class="tb tool" data-tool="canvas" title="Resize canvas (C)"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg></button>
+  <div class="sep"></div>
+  <button class="tb" id="undoBtn" title="Undo (⌘Z)"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>
+  <button class="tb" id="redoBtn" title="Redo (⇧⌘Z)"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg></button>
+  <div class="sep"></div>
+  <button class="tb" id="zoomOut" title="Zoom out (⌘−)"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+  <button class="tb label" id="zoomLabel" title="Fit to window (⌘0)">100%</button>
+  <button class="tb" id="zoomIn" title="Zoom in (⌘+)"><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></button>
+  <div class="spacer"></div>
+  <span id="dims"></span>
+  <button class="tb" id="libBtn" title="Recent images saved in this browser"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Recent</button>
+  <button class="tb" id="openBtn" title="Open image or .sshot project (⌘O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></button>
+  <button class="tb" id="projBtn" title="Save editable project file (.sshot) (⇧⌘S)"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg>Project</button>
+  <button class="tb" id="copyBtn" title="Copy image to clipboard (⌘C)"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/></svg>Copy</button>
+  <button class="tb" id="saveBtn" title="Export PNG (⌘S)"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>PNG</button>
+  <input type="file" id="fileInput" accept="image/*,.sshot,.json" hidden>
+</header>
+
+<main>
+  <div id="stage">
+    <div id="wrap">
+      <div id="box">
+        <div id="frameBg"></div>
+        <div id="frameBox"><i data-k="nw"></i><i data-k="n"></i><i data-k="ne"></i><i data-k="e"></i><i data-k="se"></i><i data-k="s"></i><i data-k="sw"></i><i data-k="w"></i><span id="frameLabel"></span></div>
+        <canvas id="cv"></canvas>
+        <textarea id="editor" spellcheck="false" placeholder="Type…"></textarea>
+      </div>
+    </div>
+    <div id="empty">
+      <div class="drop">
+        <h2>Paste a screenshot</h2>
+        <p>Press <kbd>⌘V</kbd> / <kbd>Ctrl V</kbd>, or drop an image or <code>.sshot</code> project anywhere.</p>
+        <button class="btn primary" id="emptyOpen">Open…</button>
+        <button class="btn" id="emptyBlank">Blank canvas</button>
+      </div>
+      <div id="emptyRecent"></div>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <section id="propsSec">
+      <h3 id="propsTitle">Properties</h3>
+      <div id="props"></div>
+    </section>
+    <section id="histSec">
+      <h3>History <span class="muted" id="histCount"></span></h3>
+      <ol id="hist"></ol>
+    </section>
+  </aside>
+</main>
+<div id="libModal" class="modal" hidden>
+  <div class="sheet">
+    <div class="sheetHead">
+      <h2>Recent images</h2><span class="muted">Saved automatically in this browser</span>
+      <span class="spacer"></span>
+      <button class="btn" id="libClear">Clear all</button>
+      <button class="btn" id="libClose">Close</button>
+    </div>
+    <div class="libGrid" id="libGrid"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), ctx = cv.getContext('2d');
+const ta = $('#editor'), stage = $('#stage'), panel = $('#panel');
+const mctx = document.createElement('canvas').getContext('2d'); // for text measurement
+
+const FONTS = {
+  system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  mono: 'ui-monospace, Menlo, Consolas, monospace',
+  hand: '"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive',
+};
+const SWATCHES = ['#ff3b30', '#ff9f0a', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#1c1c1e'];
+const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', step: 'Step', redact: 'Redact', canvas: 'Canvas' };
+const BG_SWATCHES = ['#ffffff', '#f2f2f7', '#d1d1d6', '#1c1c1e', '#000000', '#0a84ff', '#ff3b30', '#ffd60a'];
+const ACCENT = '#4c8dff';
+const HANDLE = 9;
+
+const DEFAULTS = {
+  arrow:   { color: '#ff3b30', width: 5, heads: 'end', headStyle: 'filled', dash: 'solid', opacity: 1 },
+  line:    { color: '#ff3b30', width: 5, dash: 'solid', opacity: 1 },
+  rect:    { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', radius: 6, dash: 'solid', opacity: 1 },
+  ellipse: { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', dash: 'solid', opacity: 1 },
+  text:    { color: '#ffffff', fontSize: 28, fontFamily: 'system', bold: true, italic: false, underline: false, strike: false,
+             outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
+  step:    { color: '#ff3b30', textColor: '#ffffff', size: 40, opacity: 1 },
+  redact:  { mode: 'pixelate', strength: 12 },
+};
+const PROPS = {
+  arrow:   ['color', 'width', 'heads', 'headStyle', 'dash', 'opacity'],
+  line:    ['color', 'width', 'dash', 'opacity'],
+  rect:    ['color', 'width', 'dash', 'radius', 'fillOn', 'fill', 'opacity'],
+  ellipse: ['color', 'width', 'dash', 'fillOn', 'fill', 'opacity'],
+  text:    ['color', 'fontSize', 'fontFamily', 'format', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
+  step:    ['n', 'color', 'textColor', 'size', 'opacity'],
+  redact:  ['mode', 'strength'],
+};
+const headIcon = (l, r) => `<svg viewBox="0 0 22 14"><path d="M3 7h16"/>${l ? '<path d="M7 3L3 7l4 4"/>' : ''}${r ? '<path d="M15 3l4 4-4 4"/>' : ''}</svg>`;
+const CTRL = {
+  color:     { label: 'Color', kind: 'color' },
+  width:     { label: 'Weight', kind: 'range', min: 1, max: 40, step: 1, minFor: { rect: 0, ellipse: 0 } },
+  heads:     { label: 'Arrowheads', kind: 'seg', options: [['none', headIcon(0, 0)], ['start', headIcon(1, 0)], ['end', headIcon(0, 1)], ['both', headIcon(1, 1)]] },
+  headStyle: { label: 'Head style', kind: 'seg', options: [['filled', 'Filled'], ['open', 'Open']] },
+  dash:      { label: 'Line style', kind: 'seg', options: [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] },
+  opacity:   { label: 'Opacity', kind: 'range', min: 0.1, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + '%' },
+  fillOn:    { label: 'Fill', kind: 'toggle' },
+  fill:      { label: 'Fill color', kind: 'color', showIf: o => o.fillOn },
+  radius:    { label: 'Corner radius', kind: 'range', min: 0, max: 40, step: 1, showIf: o => o.type !== 'text' || o.bgOn },
+  fontSize:  { label: 'Font size', kind: 'range', min: 8, max: 200, step: 1 },
+  fontFamily:{ label: 'Font', kind: 'select', options: [['system', 'Sans'], ['serif', 'Serif'], ['mono', 'Monospace'], ['hand', 'Handwritten']] },
+  format:    { label: 'Style', kind: 'format' },
+  outline:   { label: 'Outline', kind: 'toggle' },
+  bgOn:      { label: 'Background', kind: 'toggle' },
+  bgColor:   { label: 'Background color', kind: 'color', showIf: o => o.bgOn },
+  padding:   { label: 'Padding', kind: 'range', min: 0, max: 48, step: 1, showIf: o => o.bgOn },
+  n:         { label: 'Number', kind: 'number', noStyle: true },
+  textColor: { label: 'Number color', kind: 'color' },
+  size:      { label: 'Size', kind: 'range', min: 16, max: 160, step: 1 },
+  mode:      { label: 'Mode', kind: 'seg', options: [['pixelate', 'Pixelate'], ['blur', 'Blur'], ['solid', 'Solid']] },
+  strength:  { label: 'Strength', kind: 'range', min: 2, max: 48, step: 1, showIf: o => o.mode !== 'solid' },
+};
+
+// ---------- state ----------
+let base = null;         // original image (HTMLImageElement or canvas), never modified
+let frame = null;        // canvas size + where the image sits on it: { w, h, ox, oy, bg }
+const page = document.createElement('canvas'); // background + image at its offset, rebuilt when frame changes
+const baseBlobs = new WeakMap(); // base -> encoded Blob, so autosave doesn't re-encode
+let docId = null, docName = '';
+let fr = null;           // proposed canvas rect while the canvas tool is active
+let anchor = [0.5, 0.5];
+let objects = [];
+let selId = null, hoverId = null;
+let tool = 'select';
+let zoom = 1;
+let nextId = 1;
+let editing = null;      // { id, isNew }
+let drag = null;
+let hist = [], hIdx = -1;
+let styles = loadStyles();
+
+function loadStyles() {
+  const s = JSON.parse(JSON.stringify(DEFAULTS));
+  try {
+    const saved = JSON.parse(localStorage.getItem('screenshottr.styles') || '{}');
+    for (const k in s) Object.assign(s[k], saved[k] || {});
+  } catch (e) {}
+  return s;
+}
+function saveStyles() {
+  try { localStorage.setItem('screenshottr.styles', JSON.stringify(styles)); } catch (e) {}
+}
+
+const get = id => objects.find(o => o.id === id);
+const sel = () => (selId == null ? null : get(selId));
+const clone = o => JSON.parse(JSON.stringify(o));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ---------- geometry ----------
+function norm(o) {
+  let { x, y, w, h } = o;
+  if (w < 0) { x += w; w = -w; }
+  if (h < 0) { y += h; h = -h; }
+  return { x, y, w, h };
+}
+function fontOf(o, scale = 1) {
+  return `${o.italic ? 'italic ' : ''}${o.bold ? 700 : 400} ${o.fontSize * scale}px ${FONTS[o.fontFamily] || FONTS.system}`;
+}
+function textLayout(o, text = o.text) {
+  mctx.font = fontOf(o);
+  const lines = (text || '').split('\n');
+  const lh = o.fontSize * 1.25;
+  let w = 0;
+  for (const l of lines) w = Math.max(w, mctx.measureText(l).width);
+  return { lines, lh, w: w + o.padding * 2, h: lines.length * lh + o.padding * 2 };
+}
+function bbox(o) {
+  switch (o.type) {
+    case 'arrow': case 'line':
+      return { x: Math.min(o.x1, o.x2), y: Math.min(o.y1, o.y2), w: Math.abs(o.x2 - o.x1), h: Math.abs(o.y2 - o.y1) };
+    case 'text': { const L = textLayout(o); return { x: o.x, y: o.y, w: L.w, h: L.h }; }
+    case 'step': { const r = o.size / 2; return { x: o.x - r, y: o.y - r, w: o.size, h: o.size }; }
+    default: return norm(o);
+  }
+}
+function distSeg(p, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = dx * dx + dy * dy;
+  const t = L ? clamp(((p.x - x1) * dx + (p.y - y1) * dy) / L, 0, 1) : 0;
+  return Math.hypot(p.x - (x1 + t * dx), p.y - (y1 + t * dy));
+}
+const inBox = (p, b, pad = 0) => p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
+
+function hitObj(o, p) {
+  const tol = 6 / zoom;
+  switch (o.type) {
+    case 'arrow': case 'line':
+      return distSeg(p, o.x1, o.y1, o.x2, o.y2) <= o.width / 2 + tol;
+    case 'rect': {
+      const b = norm(o), edge = o.width / 2 + tol;
+      if (!inBox(p, b, edge)) return false;
+      if (o.fillOn) return true;
+      return !(b.w > edge * 2 && b.h > edge * 2 && inBox(p, { x: b.x + edge, y: b.y + edge, w: b.w - edge * 2, h: b.h - edge * 2 }));
+    }
+    case 'ellipse': {
+      const b = norm(o), rx = Math.max(b.w / 2, 1), ry = Math.max(b.h / 2, 1);
+      const d = Math.hypot((p.x - b.x - rx) / rx, (p.y - b.y - ry) / ry);
+      const band = (o.width / 2 + tol) / Math.min(rx, ry);
+      return o.fillOn ? d <= 1 + band : Math.abs(d - 1) <= band;
+    }
+    case 'step': return Math.hypot(p.x - o.x, p.y - o.y) <= o.size / 2 + tol / 2;
+    default: return inBox(p, bbox(o), tol / 2);
+  }
+}
+function hitTest(p) {
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const o = objects[i];
+    if (editing && editing.id === o.id) continue;
+    if (hitObj(o, p)) return o;
+  }
+  return null;
+}
+function handles(o) {
+  if (o.type === 'arrow' || o.type === 'line') return [{ k: 'p1', x: o.x1, y: o.y1 }, { k: 'p2', x: o.x2, y: o.y2 }];
+  if (o.type === 'step') return [];
+  const b = bbox(o);
+  if (o.type === 'text') return [{ k: 'se', x: b.x + b.w, y: b.y + b.h }];
+  const { x, y, w, h } = b;
+  return [
+    { k: 'nw', x, y }, { k: 'n', x: x + w / 2, y }, { k: 'ne', x: x + w, y },
+    { k: 'e', x: x + w, y: y + h / 2 }, { k: 'se', x: x + w, y: y + h },
+    { k: 's', x: x + w / 2, y: y + h }, { k: 'sw', x, y: y + h }, { k: 'w', x, y: y + h / 2 },
+  ];
+}
+function hitHandle(o, p) {
+  const r = HANDLE / zoom;
+  for (const h of handles(o)) if (Math.abs(p.x - h.x) <= r && Math.abs(p.y - h.y) <= r) return h.k;
+  return null;
+}
+const CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', p1: 'crosshair', p2: 'crosshair' };
+
+function snapAngle(ax, ay, bx, by) {
+  const step = Math.PI / 12, L = Math.hypot(bx - ax, by - ay);
+  const a = Math.round(Math.atan2(by - ay, bx - ax) / step) * step;
+  return { x: ax + L * Math.cos(a), y: ay + L * Math.sin(a) };
+}
+
+// ---------- drawing ----------
+function roundRectPath(c, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+function setDash(c, o) {
+  const w = Math.max(o.width, 1);
+  c.setLineDash(o.dash === 'dashed' ? [w * 2.5, w * 2] : o.dash === 'dotted' ? [0.01, w * 2] : []);
+}
+function contrast(hex) {
+  const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? '#000000' : '#ffffff';
+}
+function drawHead(c, x, y, ang, hl, w, filled) {
+  const a = Math.PI / 7;
+  c.setLineDash([]);
+  c.beginPath();
+  c.moveTo(x - hl * Math.cos(ang - a), y - hl * Math.sin(ang - a));
+  c.lineTo(x, y);
+  c.lineTo(x - hl * Math.cos(ang + a), y - hl * Math.sin(ang + a));
+  if (filled) {
+    c.closePath(); c.fill();
+    c.lineWidth = Math.max(1, w * 0.4); c.stroke();
+  } else {
+    c.stroke();
+  }
+}
+function drawLine(c, o) {
+  const { x1, y1, x2, y2, width: w } = o;
+  const heads = o.type === 'arrow' ? o.heads : 'none';
+  const hasS = heads === 'start' || heads === 'both', hasE = heads === 'end' || heads === 'both';
+  const filled = o.headStyle !== 'open';
+  const ang = Math.atan2(y2 - y1, x2 - x1), len = Math.hypot(x2 - x1, y2 - y1);
+  const hl = Math.min(10 + w * 3, len * ((hasS && hasE) ? 0.45 : 0.7));
+  const cos = Math.cos(ang), sin = Math.sin(ang), back = filled ? hl * 0.75 : 0;
+  let sx = x1, sy = y1, ex = x2, ey = y2;
+  if (hasE) { ex -= cos * back; ey -= sin * back; }
+  if (hasS) { sx += cos * back; sy += sin * back; }
+  c.strokeStyle = c.fillStyle = o.color;
+  c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round';
+  setDash(c, o);
+  c.beginPath(); c.moveTo(sx, sy); c.lineTo(ex, ey); c.stroke();
+  c.lineWidth = w;
+  if (hasE) drawHead(c, x2, y2, ang, hl, w, filled);
+  c.lineWidth = w;
+  if (hasS) drawHead(c, x1, y1, ang + Math.PI, hl, w, filled);
+}
+function drawText(c, o) {
+  const L = textLayout(o);
+  if (o.bgOn) {
+    c.fillStyle = o.bgColor;
+    roundRectPath(c, o.x, o.y, L.w, L.h, o.radius);
+    c.fill();
+  }
+  c.font = fontOf(o);
+  c.textBaseline = 'middle';
+  c.textAlign = 'left';
+  const th = Math.max(1, o.fontSize / 14);
+  L.lines.forEach((ln, i) => {
+    const tx = o.x + o.padding, cy = o.y + o.padding + i * L.lh + L.lh / 2;
+    if (o.outline) {
+      c.lineWidth = Math.max(2, o.fontSize / 6); c.lineJoin = 'round';
+      c.strokeStyle = contrast(o.color);
+      c.strokeText(ln, tx, cy);
+    }
+    c.fillStyle = o.color;
+    c.fillText(ln, tx, cy);
+    const lw = c.measureText(ln).width;
+    if (o.underline) c.fillRect(tx, cy + o.fontSize * 0.4, lw, th);
+    if (o.strike) c.fillRect(tx, cy - th / 2 + o.fontSize * 0.04, lw, th);
+  });
+}
+const redactTmp = document.createElement('canvas');
+function drawRedact(c, o) {
+  const b = norm(o);
+  const W = page.width, H = page.height;
+  const x = clamp(Math.round(b.x), 0, W), y = clamp(Math.round(b.y), 0, H);
+  const w = clamp(Math.round(b.x + b.w), 0, W) - x, h = clamp(Math.round(b.y + b.h), 0, H) - y;
+  if (w < 1 || h < 1) return;
+  if (o.mode === 'solid') { c.fillStyle = '#111'; c.fillRect(x, y, w, h); return; }
+  if (o.mode === 'blur' && 'filter' in c) {
+    const p = o.strength * 2;
+    c.save();
+    c.beginPath(); c.rect(x, y, w, h); c.clip();
+    c.filter = `blur(${o.strength}px)`;
+    const sx = Math.max(0, x - p), sy = Math.max(0, y - p);
+    const sw = Math.min(W, x + w + p) - sx, sh = Math.min(H, y + h + p) - sy;
+    c.drawImage(page, sx, sy, sw, sh, sx, sy, sw, sh);
+    c.restore();
+    return;
+  }
+  const bs = Math.max(2, o.strength), sw = Math.max(1, Math.ceil(w / bs)), sh = Math.max(1, Math.ceil(h / bs));
+  redactTmp.width = sw; redactTmp.height = sh;
+  const t = redactTmp.getContext('2d');
+  t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'medium';
+  t.drawImage(page, x, y, w, h, 0, 0, sw, sh);
+  c.imageSmoothingEnabled = false;
+  c.drawImage(redactTmp, 0, 0, sw, sh, x, y, w, h);
+  c.imageSmoothingEnabled = true;
+}
+function drawObj(c, o) {
+  c.save();
+  c.globalAlpha = o.opacity ?? 1;
+  switch (o.type) {
+    case 'arrow': case 'line': drawLine(c, o); break;
+    case 'rect': {
+      const b = norm(o);
+      roundRectPath(c, b.x, b.y, b.w, b.h, o.radius);
+      if (o.fillOn) { c.fillStyle = o.fill; c.fill(); }
+      if (o.width > 0) { c.strokeStyle = o.color; c.lineWidth = o.width; c.lineJoin = 'round'; c.lineCap = 'round'; setDash(c, o); c.stroke(); }
+      break;
+    }
+    case 'ellipse': {
+      const b = norm(o);
+      c.beginPath();
+      c.ellipse(b.x + b.w / 2, b.y + b.h / 2, Math.max(b.w / 2, .1), Math.max(b.h / 2, .1), 0, 0, Math.PI * 2);
+      if (o.fillOn) { c.fillStyle = o.fill; c.fill(); }
+      if (o.width > 0) { c.strokeStyle = o.color; c.lineWidth = o.width; c.lineCap = 'round'; setDash(c, o); c.stroke(); }
+      break;
+    }
+    case 'text': drawText(c, o); break;
+    case 'step': {
+      const r = o.size / 2;
+      c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = o.size / 8; c.shadowOffsetY = o.size / 20;
+      c.beginPath(); c.arc(o.x, o.y, r, 0, Math.PI * 2); c.fillStyle = o.color; c.fill();
+      c.shadowColor = 'transparent';
+      c.fillStyle = o.textColor;
+      const label = String(o.n);
+      c.font = `700 ${o.size * (label.length > 2 ? 0.38 : label.length > 1 ? 0.48 : 0.56)}px ${FONTS.system}`;
+      c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(label, o.x, o.y + o.size * 0.03);
+      break;
+    }
+    case 'redact': drawRedact(c, o); break;
+  }
+  c.restore();
+}
+function drawOverlay(c) {
+  const lw = 1.5 / zoom, hs = HANDLE / zoom;
+  const hov = hoverId != null && hoverId !== selId ? get(hoverId) : null;
+  if (hov) {
+    c.save(); c.strokeStyle = ACCENT; c.globalAlpha = .6; c.lineWidth = lw;
+    const b = bbox(hov), p = 4 / zoom;
+    c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
+    c.restore();
+  }
+  const o = sel();
+  if (!o || (editing && editing.id === o.id)) return;
+  c.save();
+  c.strokeStyle = ACCENT; c.lineWidth = lw;
+  if (o.type !== 'arrow' && o.type !== 'line') {
+    const b = bbox(o), p = o.type === 'text' || o.type === 'step' ? 3 / zoom : 0;
+    c.setLineDash([4 / zoom, 3 / zoom]);
+    c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
+    c.setLineDash([]);
+  }
+  c.fillStyle = '#fff';
+  for (const h of handles(o)) {
+    c.beginPath();
+    if (h.k === 'p1' || h.k === 'p2') c.arc(h.x, h.y, hs / 1.6, 0, Math.PI * 2);
+    else c.rect(h.x - hs / 2, h.y - hs / 2, hs, hs);
+    c.fill(); c.stroke();
+  }
+  c.restore();
+}
+let raf = 0;
+function render() {
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    if (!base) return;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(page, 0, 0);
+    for (const o of objects) if (!(editing && editing.id === o.id)) drawObj(ctx, o);
+    drawOverlay(ctx);
+  });
+}
+
+// ---------- history ----------
+function pushHistory(label, mergeKey) {
+  const state = JSON.stringify({ objects, frame });
+  const cur = hist[hIdx];
+  if (cur && cur.state === state && cur.base === base) return;
+  const now = Date.now();
+  if (mergeKey && cur && cur.mergeKey === mergeKey && hIdx === hist.length - 1 && now - cur.t < 1500 && cur.base === base) {
+    cur.state = state; cur.t = now;
+  } else {
+    hist = hist.slice(0, hIdx + 1);
+    hist.push({ label, state, base, docId, docName, mergeKey, t: now });
+    if (hist.length > 300) hist.shift();
+    hIdx = hist.length - 1;
+  }
+  renderHistory();
+  scheduleSave();
+}
+function gotoHistory(i) {
+  commitEdit();
+  if (i < 0 || i >= hist.length || i === hIdx) return;
+  hIdx = i;
+  const h = hist[i], s = JSON.parse(h.state);
+  objects = s.objects;
+  frame = s.frame;
+  for (const o of objects) nextId = Math.max(nextId, o.id + 1);
+  const imageChanged = h.base !== base;
+  base = h.base; docId = h.docId; docName = h.docName;
+  rebuildPage();
+  if (imageChanged) fit();
+  if (!sel()) selId = null;
+  hoverId = null;
+  resetFrameRect();
+  refreshPanel(); renderHistory(); render();
+  scheduleSave();
+}
+const undo = () => gotoHistory(hIdx - 1);
+const redo = () => gotoHistory(hIdx + 1);
+function renderHistory() {
+  const ol = $('#hist');
+  ol.innerHTML = '';
+  hist.forEach((h, i) => {
+    const li = document.createElement('li');
+    li.className = i === hIdx ? 'cur' : i > hIdx ? 'future' : '';
+    li.innerHTML = `<span class="n">${i + 1}</span><span></span>`;
+    li.lastChild.textContent = h.label;
+    li.onclick = () => gotoHistory(i);
+    ol.append(li);
+  });
+  const cur = ol.children[hIdx];
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+  $('#histCount').textContent = hist.length ? `${hIdx + 1} / ${hist.length}` : '';
+  $('#undoBtn').disabled = hIdx <= 0;
+  $('#redoBtn').disabled = hIdx >= hist.length - 1;
+}
+
+// ---------- image / canvas ----------
+function rebuildPage() {
+  if (!base) return;
+  page.width = frame.w; page.height = frame.h;
+  const p = page.getContext('2d');
+  p.clearRect(0, 0, frame.w, frame.h);
+  if (frame.bg) { p.fillStyle = frame.bg; p.fillRect(0, 0, frame.w, frame.h); }
+  p.drawImage(base, frame.ox, frame.oy);
+  cv.width = frame.w; cv.height = frame.h;
+  $('#dims').textContent = `${frame.w} × ${frame.h}`;
+  setZoom(zoom);
+}
+// Show a document: an image plus (optionally) its saved canvas frame and annotations.
+function openDoc(img, { frame: f, objects: objs = [], id, name, label }) {
+  commitEdit();
+  base = img;
+  frame = f ? { ...f } : { w: img.width, h: img.height, ox: 0, oy: 0, bg: '#ffffff' };
+  objects = clone(objs);
+  for (const o of objects) nextId = Math.max(nextId, o.id + 1);
+  docId = id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  docName = name || 'Untitled';
+  selId = null; hoverId = null;
+  $('#empty').style.display = 'none';
+  $('#box').style.display = 'block';
+  for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel']) $(b).disabled = false;
+  rebuildPage();
+  fit();
+  resetFrameRect();
+  pushHistory(label || name);
+  refreshPanel();
+}
+function blobToImage(blob) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => { baseBlobs.set(img, blob); res(img); };
+    img.onerror = rej;
+    img.src = URL.createObjectURL(blob);
+  });
+}
+async function loadFile(file) {
+  if (!file) return;
+  try {
+    if (/\.(sshot|json)$/i.test(file.name || '') || file.type === 'application/json') return await loadProject(file);
+    if (!file.type.startsWith('image/')) return toast('That is not an image or .sshot project');
+    const img = await blobToImage(file);
+    const pasted = !file.name || file.name === 'image.png';
+    const name = pasted ? 'Screenshot ' + new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : file.name;
+    openDoc(img, { name, label: pasted ? 'Pasted image' : 'Opened ' + name });
+  } catch (e) {
+    console.error(e);
+    toast('Could not open that file');
+  }
+}
+function setZoom(z) {
+  if (!base) return;
+  zoom = clamp(z, 0.05, 8);
+  cv.style.width = frame.w * zoom + 'px';
+  cv.style.height = frame.h * zoom + 'px';
+  $('#zoomLabel').textContent = Math.round(zoom * 100) + '%';
+  if (editing) styleEditor();
+  updateFrameBox();
+  render();
+}
+function fit() {
+  if (!base) return;
+  setZoom(Math.min(1, (stage.clientWidth - 80) / frame.w, (stage.clientHeight - 80) / frame.h));
+}
+function zoomAt(z, cx, cy) {
+  const r = cv.getBoundingClientRect();
+  const ix = (cx - r.left) / zoom, iy = (cy - r.top) / zoom;
+  setZoom(z);
+  const r2 = cv.getBoundingClientRect();
+  stage.scrollLeft += r2.left + ix * zoom - cx;
+  stage.scrollTop += r2.top + iy * zoom - cy;
+}
+function zoomStep(dir) {
+  const r = stage.getBoundingClientRect();
+  zoomAt(zoom * (dir > 0 ? 1.25 : 0.8), r.left + r.width / 2, r.top + r.height / 2);
+}
+function exportCanvas() {
+  const c = document.createElement('canvas');
+  c.width = frame.w; c.height = frame.h;
+  const x = c.getContext('2d');
+  x.drawImage(page, 0, 0);
+  for (const o of objects) drawObj(x, o);
+  return c;
+}
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+function download(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const toBlob = c => new Promise(res => c.toBlob(res, 'image/png'));
+async function copyImage() {
+  if (!base) return;
+  commitEdit();
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': toBlob(exportCanvas()) })]);
+    toast('Copied image to clipboard');
+  } catch (e) {
+    toast('Clipboard not available here — use Save instead');
+  }
+}
+async function saveImage() {
+  if (!base) return;
+  commitEdit();
+  const name = `screenshot-${stamp()}.png`;
+  download(await toBlob(exportCanvas()), name);
+  toast('Saved ' + name);
+}
+
+// ---------- project files (.sshot) ----------
+// JSON: { app, version, id, name, image: <PNG data URL of the original image>, frame, objects }
+async function encodeBase() {
+  let blob = baseBlobs.get(base);
+  if (!blob) {
+    const c = document.createElement('canvas');
+    c.width = base.width; c.height = base.height;
+    c.getContext('2d').drawImage(base, 0, 0);
+    blob = await toBlob(c);
+    baseBlobs.set(base, blob);
+  }
+  return blob;
+}
+const blobToDataURL = blob => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result); r.onerror = () => rej(r.error);
+  r.readAsDataURL(blob);
+});
+function dataURLToBlob(url) {
+  const [head, data] = url.split(',');
+  const bin = atob(data), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: head.match(/data:([^;]+)/)[1] });
+}
+async function saveProject() {
+  if (!base) return;
+  commitEdit();
+  const data = {
+    app: 'screenshottr', version: 1, id: docId, name: docName,
+    image: await blobToDataURL(await encodeBase()), frame, objects,
+  };
+  const name = `${(docName || 'screenshot').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'screenshot'}-${stamp()}.sshot`;
+  download(new Blob([JSON.stringify(data)], { type: 'application/json' }), name);
+  toast('Saved project ' + name);
+}
+async function loadProject(file) {
+  const d = JSON.parse(await file.text());
+  if (d.app !== 'screenshottr' || !d.image) throw new Error('Not a Screenshottr project');
+  const img = await blobToImage(dataURLToBlob(d.image));
+  openDoc(img, { frame: d.frame, objects: d.objects || [], id: d.id, name: d.name, label: 'Opened project' });
+}
+
+// ---------- local library (IndexedDB) ----------
+const DB = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('screenshottr', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('docs', { keyPath: 'id' });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('docs', mode), req = fn(t.objectStore('docs'));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    put: d => run('readwrite', s => s.put(d)),
+    get: id => run('readonly', s => s.get(id)),
+    del: id => run('readwrite', s => s.delete(id)),
+    clear: () => run('readwrite', s => s.clear()),
+    all: () => run('readonly', s => s.getAll()),
+  };
+})();
+const LIBRARY_MAX = 60;
+let saveT = 0, dbWarned = false;
+function scheduleSave() {
+  clearTimeout(saveT);
+  saveT = setTimeout(saveDoc, 700);
+}
+function thumbnail() {
+  const src = exportCanvas(), s = Math.min(1, 400 / Math.max(src.width, src.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(src.width * s)); c.height = Math.max(1, Math.round(src.height * s));
+  const x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/webp', 0.85);
+}
+async function saveDoc() {
+  if (!base || !docId) return;
+  // snapshot synchronously; the document may change while we await
+  const rec = { id: docId, name: docName, updated: Date.now(), frame: clone(frame), objects: clone(objects), thumb: thumbnail() };
+  const img = base;
+  try {
+    rec.image = baseBlobs.get(img) || await encodeBase();
+    const prev = await DB.get(rec.id);
+    rec.created = prev ? prev.created : rec.updated;
+    await DB.put(rec);
+    const all = await DB.all();
+    if (all.length > LIBRARY_MAX) {
+      all.sort((a, b) => b.updated - a.updated);
+      for (const old of all.slice(LIBRARY_MAX)) await DB.del(old.id);
+    }
+  } catch (e) {
+    console.warn('Library save failed', e);
+    if (!dbWarned) { dbWarned = true; toast('Could not save to the local library in this browser'); }
+  }
+}
+function ago(t) {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+  return new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+async function renderLibrary(container, limit) {
+  let all = [];
+  try { all = await DB.all(); } catch (e) {}
+  all.sort((a, b) => b.updated - a.updated);
+  if (limit) all = all.slice(0, limit);
+  container.innerHTML = '';
+  if (!all.length) {
+    if (!limit) container.append(el('div', 'libEmpty', 'Nothing here yet. Images you paste or open are saved here automatically.'));
+    return 0;
+  }
+  for (const rec of all) {
+    const card = el('div', 'card' + (rec.id === docId ? ' cur' : ''));
+    const th = el('div', 'thumb checker'), im = el('img');
+    im.src = rec.thumb; im.alt = '';
+    th.append(im);
+    const meta = el('div', 'meta');
+    const n = rec.objects ? rec.objects.length : 0;
+    meta.append(el('b', '', rec.name || 'Untitled'),
+      el('span', '', `${rec.frame.w} × ${rec.frame.h} · ${n} annotation${n === 1 ? '' : 's'} · ${ago(rec.updated)}`));
+    const x = el('button', 'x', '×');
+    x.title = 'Remove from library';
+    x.onclick = async ev => {
+      ev.stopPropagation();
+      await DB.del(rec.id);
+      card.remove();
+      if (!container.children.length) renderLibrary(container, limit);
+    };
+    card.onclick = () => openRecord(rec);
+    card.append(th, meta, x);
+    container.append(card);
+  }
+  return all.length;
+}
+async function openRecord(rec) {
+  closeLibrary();
+  try {
+    const img = await blobToImage(rec.image);
+    openDoc(img, { frame: rec.frame, objects: rec.objects, id: rec.id, name: rec.name, label: 'Opened ' + (rec.name || 'image') });
+  } catch (e) {
+    toast('Could not open that image');
+  }
+}
+function openLibrary() {
+  commitEdit();
+  $('#libModal').hidden = false;
+  renderLibrary($('#libGrid'));
+}
+function closeLibrary() { $('#libModal').hidden = true; }
+async function renderEmptyRecent() {
+  const box = $('#emptyRecent');
+  box.innerHTML = '';
+  const h = el('h3', '', 'Recent');
+  const grid = el('div', 'libGrid');
+  box.append(h, grid);
+  const n = await renderLibrary(grid, 12);
+  if (!n) box.innerHTML = '';
+}
+
+// ---------- canvas resize ----------
+// fr is the proposed canvas in current canvas coordinates; (0,0,w,h) means unchanged.
+function resetFrameRect() { if (frame) fr = { x1: 0, y1: 0, x2: frame.w, y2: frame.h }; }
+function updateFrameBox() {
+  const show = tool === 'canvas' && !!base && !!fr;
+  const box = $('#frameBox'), bg = $('#frameBg');
+  box.style.display = bg.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  for (const e of [box, bg]) {
+    e.style.left = fr.x1 * zoom + 'px'; e.style.top = fr.y1 * zoom + 'px';
+    e.style.width = (fr.x2 - fr.x1) * zoom + 'px'; e.style.height = (fr.y2 - fr.y1) * zoom + 'px';
+  }
+  bg.className = frame.bg ? '' : 'checker';
+  bg.style.background = frame.bg || '';
+  $('#frameLabel').textContent = `${fr.x2 - fr.x1} × ${fr.y2 - fr.y1}`;
+}
+function applyFrame(r, label) {
+  const w = Math.round(r.x2 - r.x1), h = Math.round(r.y2 - r.y1);
+  const dx = Math.round(r.x1), dy = Math.round(r.y1);
+  if (w === frame.w && h === frame.h && !dx && !dy) return resetFrameRect(), updateFrameBox();
+  if (w < 1 || h < 1 || w > 16384 || h > 16384) return toast('Canvas size must be between 1 and 16384 px');
+  for (const o of objects) {
+    if ('x1' in o) { o.x1 -= dx; o.y1 -= dy; o.x2 -= dx; o.y2 -= dy; } else { o.x -= dx; o.y -= dy; }
+  }
+  frame = { ...frame, w, h, ox: frame.ox - dx, oy: frame.oy - dy };
+  rebuildPage();
+  resetFrameRect();
+  updateFrameBox();
+  pushHistory(label);
+  refreshPanel(); render();
+}
+let fdrag = null;
+$('#frameBox').addEventListener('pointerdown', e => {
+  const k = e.target.dataset.k;
+  if (!k) return;
+  e.preventDefault();
+  e.target.setPointerCapture(e.pointerId);
+  fdrag = { k, sx: e.clientX, sy: e.clientY, start: { ...fr } };
+});
+$('#frameBox').addEventListener('pointermove', e => {
+  if (!fdrag) return;
+  const { k, start: s } = fdrag, MIN = 16;
+  const dx = Math.round((e.clientX - fdrag.sx) / zoom), dy = Math.round((e.clientY - fdrag.sy) / zoom);
+  const r = { ...s };
+  if (k.includes('w')) { r.x1 = Math.min(s.x1 + dx, s.x2 - MIN); if (e.altKey) r.x2 = s.x2 - dx; }
+  if (k.includes('e')) { r.x2 = Math.max(s.x2 + dx, s.x1 + MIN); if (e.altKey) r.x1 = s.x1 - dx; }
+  if (k.includes('n')) { r.y1 = Math.min(s.y1 + dy, s.y2 - MIN); if (e.altKey) r.y2 = s.y2 - dy; }
+  if (k.includes('s')) { r.y2 = Math.max(s.y2 + dy, s.y1 + MIN); if (e.altKey) r.y1 = s.y1 - dy; }
+  if (r.x2 - r.x1 < MIN || r.y2 - r.y1 < MIN) return;
+  fr = r;
+  updateFrameBox();
+});
+const endFrameDrag = () => {
+  if (!fdrag) return;
+  fdrag = null;
+  applyFrame(fr, 'Resize canvas');
+};
+$('#frameBox').addEventListener('pointerup', endFrameDrag);
+$('#frameBox').addEventListener('pointercancel', endFrameDrag);
+
+function contentBounds() {
+  let x1 = frame.ox, y1 = frame.oy, x2 = frame.ox + base.width, y2 = frame.oy + base.height;
+  for (const o of objects) {
+    const b = bbox(o), pad = (o.width || 0) / 2 + (o.type === 'arrow' ? 10 + o.width * 3 : 2);
+    x1 = Math.min(x1, b.x - pad); y1 = Math.min(y1, b.y - pad);
+    x2 = Math.max(x2, b.x + b.w + pad); y2 = Math.max(y2, b.y + b.h + pad);
+  }
+  return { x1: Math.floor(x1), y1: Math.floor(y1), x2: Math.ceil(x2), y2: Math.ceil(y2) };
+}
+function setCanvasBg(bg, commit) {
+  frame.bg = bg;
+  rebuildPage(); updateFrameBox(); render();
+  if (commit) pushHistory('Canvas background', 'canvas-bg');
+}
+function buildCanvasPanel(props) {
+  props.append(el('p', 'hint', 'Drag the handles around the canvas to add space or crop. Hold ⌥/Alt to resize both sides. The image and annotations keep their size.'));
+
+  const sizeRow = el('div', 'row');
+  sizeRow.append(el('label', 'lab', 'Size (px)'));
+  const line = el('div', 'sizeRow');
+  const g = el('div', 'grid2');
+  const mkNum = (label, val) => {
+    const w = el('div'), i = el('input');
+    i.type = 'number'; i.min = 1; i.max = 16384; i.value = val;
+    w.append(el('label', 'lab', label), i);
+    g.append(w);
+    return i;
+  };
+  const wi = mkNum('Width', frame.w), hi = mkNum('Height', frame.h);
+  const anc = el('div', 'anchor');
+  anc.title = 'Anchor: where the existing content stays';
+  for (const ay of [0, 0.5, 1]) for (const ax of [0, 0.5, 1]) {
+    const b = el('button', anchor[0] === ax && anchor[1] === ay ? 'on' : '');
+    b.onclick = () => { anchor = [ax, ay]; refreshPanel(); };
+    anc.append(b);
+  }
+  line.append(g, anc);
+  sizeRow.append(line);
+  const applySize = () => {
+    const W = Math.round(+wi.value), H = Math.round(+hi.value);
+    if (!(W >= 1 && H >= 1)) return;
+    const x1 = Math.round((frame.w - W) * anchor[0]), y1 = Math.round((frame.h - H) * anchor[1]);
+    applyFrame({ x1, y1, x2: x1 + W, y2: y1 + H }, 'Resize canvas');
+  };
+  for (const i of [wi, hi]) i.addEventListener('keydown', e => { if (e.key === 'Enter') applySize(); });
+  props.append(sizeRow);
+
+  const a = el('div', 'actions');
+  const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
+  mk('Apply size', applySize, 'primary');
+  mk('Add 40px padding', () => applyFrame({ x1: -40, y1: -40, x2: frame.w + 40, y2: frame.h + 40 }, 'Add padding'));
+  mk('Fit to image', () => applyFrame({ x1: frame.ox, y1: frame.oy, x2: frame.ox + base.width, y2: frame.oy + base.height }, 'Fit canvas to image'));
+  mk('Fit to content', () => applyFrame(contentBounds(), 'Fit canvas to content'));
+  a.style.marginBottom = '14px';
+  props.append(a);
+
+  const bgRow = el('div', 'row');
+  bgRow.append(el('label', 'lab', 'Background (new space)'));
+  const sw = el('div', 'swatches');
+  for (const c of BG_SWATCHES) {
+    const b = el('button', 'sw' + (frame.bg && frame.bg.toLowerCase() === c ? ' on' : ''));
+    b.style.background = c; b.title = c;
+    b.onclick = () => { setCanvasBg(c, true); refreshPanel(); };
+    sw.append(b);
+  }
+  const ci = el('input');
+  ci.type = 'color'; ci.value = frame.bg || '#ffffff'; ci.title = 'Custom color';
+  ci.oninput = () => setCanvasBg(ci.value, false);
+  ci.onchange = () => { setCanvasBg(ci.value, true); refreshPanel(); };
+  sw.append(ci);
+  bgRow.append(sw);
+  props.append(bgRow);
+
+  const tr = el('div', 'row rowInline');
+  tr.append(el('label', 'lab', 'Transparent'));
+  const t = el('button', 'switch' + (frame.bg ? '' : ' on'));
+  t.onclick = () => { setCanvasBg(frame.bg ? null : '#ffffff', true); refreshPanel(); };
+  tr.append(t);
+  props.append(tr);
+}
+let toastT;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+// ---------- text editing ----------
+function startEdit(o, isNew) {
+  editing = { id: o.id, isNew };
+  selId = o.id;
+  ta.value = o.text || '';
+  ta.style.display = 'block';
+  styleEditor();
+  ta.focus();
+  if (!isNew) ta.select();
+  refreshPanel(); render();
+}
+function styleEditor() {
+  const o = editing && get(editing.id);
+  if (!o) return;
+  const z = zoom, s = ta.style;
+  s.left = o.x * z + 'px'; s.top = o.y * z + 'px';
+  s.font = fontOf(o, z);
+  s.lineHeight = o.fontSize * 1.25 * z + 'px';
+  s.padding = o.padding * z + 'px';
+  s.color = o.color;
+  s.background = o.bgOn ? o.bgColor : 'transparent';
+  s.borderRadius = (o.bgOn ? o.radius * z : 0) + 'px';
+  s.textDecoration = [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ') || 'none';
+  s.opacity = o.opacity;
+  const oc = contrast(o.color), ow = Math.max(1, o.fontSize * z / 14);
+  s.textShadow = o.outline ? `${ow}px 0 ${oc}, -${ow}px 0 ${oc}, 0 ${ow}px ${oc}, 0 -${ow}px ${oc}` : 'none';
+  sizeEditor();
+}
+function sizeEditor() {
+  const o = get(editing.id);
+  const L = textLayout(o, ta.value || 'Type…');
+  ta.style.width = L.w * zoom + o.fontSize * zoom * 0.6 + 'px';
+  ta.style.height = L.h * zoom + 'px';
+}
+function commitEdit() {
+  if (!editing) return;
+  const { id, isNew } = editing;
+  editing = null;
+  ta.style.display = 'none';
+  const o = get(id);
+  if (o) {
+    o.text = ta.value.replace(/\s+$/, '');
+    if (!o.text.trim()) {
+      objects = objects.filter(x => x !== o);
+      if (selId === id) selId = null;
+      if (!isNew) pushHistory('Delete text');
+    } else {
+      pushHistory(isNew ? 'Add text' : 'Edit text');
+    }
+  }
+  refreshPanel(); render();
+}
+ta.addEventListener('input', () => {
+  const o = editing && get(editing.id);
+  if (o) { o.text = ta.value; sizeEditor(); }
+});
+ta.addEventListener('blur', e => {
+  if (e.relatedTarget && panel.contains(e.relatedTarget)) return;
+  commitEdit();
+});
+panel.addEventListener('focusout', e => {
+  if (editing && e.relatedTarget !== ta && !(e.relatedTarget && panel.contains(e.relatedTarget))) commitEdit();
+});
+// keep the text editor focused when clicking panel buttons
+panel.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
+
+// ---------- pointer ----------
+function pt(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height };
+}
+function newObj(type, extra) {
+  const o = { id: nextId++, type, ...clone(styles[type]), ...extra };
+  objects.push(o);
+  selId = o.id;
+  return o;
+}
+cv.addEventListener('mousedown', e => e.preventDefault()); // don't steal focus from the text editor
+cv.addEventListener('pointerdown', e => {
+  if (!base || e.button !== 0) return;
+  const wasEditing = !!editing;
+  commitEdit();
+  if (tool === 'canvas') return;
+  const p = pt(e);
+  cv.setPointerCapture(e.pointerId);
+
+  const s = sel();
+  if (s) {
+    const k = hitHandle(s, p);
+    if (k) { drag = { mode: 'handle', k, start: p, orig: clone(s) }; return; }
+  }
+  if (tool === 'select') {
+    const o = hitTest(p);
+    selId = o ? o.id : null;
+    if (o) drag = { mode: 'move', start: p, orig: clone(o), moved: false, label: 'Move ' + NAMES[o.type].toLowerCase() };
+    refreshPanel(); render();
+    return;
+  }
+  if (tool === 'text') {
+    const o = hitTest(p);
+    if (o && o.type === 'text') { startEdit(o, false); selectMode(); return; }
+    if (wasEditing) { selId = null; refreshPanel(); render(); return; }
+    const st = styles.text;
+    const t = newObj('text', { x: p.x - st.padding, y: p.y - st.fontSize * 0.625 - st.padding, text: '' });
+    startEdit(t, true);
+    selectMode();
+    return;
+  }
+  if (tool === 'step') {
+    const n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
+    const o = newObj('step', { x: p.x, y: p.y, n });
+    drag = { mode: 'move', start: p, orig: clone(o), moved: true, label: 'Add step ' + n };
+    selectMode();
+    render();
+    return;
+  }
+  const o = (tool === 'arrow' || tool === 'line')
+    ? newObj(tool, { x1: p.x, y1: p.y, x2: p.x, y2: p.y })
+    : newObj(tool, { x: p.x, y: p.y, w: 0, h: 0 });
+  drag = { mode: 'create', start: p, id: o.id };
+  refreshPanel(); render();
+});
+cv.addEventListener('pointermove', e => {
+  if (!base) return;
+  const p = pt(e);
+  if (!drag) return updateHover(p);
+  const o = sel();
+  if (!o) return;
+  const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+  if (drag.mode === 'move') {
+    if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
+    drag.moved = true;
+    const a = drag.orig;
+    if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
+    else { o.x = a.x + dx; o.y = a.y + dy; }
+  } else if (drag.mode === 'create') {
+    if ('x1' in o) {
+      const q = e.shiftKey ? snapAngle(o.x1, o.y1, p.x, p.y) : p;
+      o.x2 = q.x; o.y2 = q.y;
+    } else {
+      let w = p.x - o.x, h = p.y - o.y;
+      if (e.shiftKey) { const m = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * m; h = Math.sign(h || 1) * m; }
+      o.w = w; o.h = h;
+    }
+  } else if (drag.mode === 'handle') {
+    applyHandle(o, drag.orig, drag.k, p, e.shiftKey);
+  }
+  render();
+});
+function applyHandle(o, a, k, p, shift) {
+  if (k === 'p1') { const q = shift ? snapAngle(a.x2, a.y2, p.x, p.y) : p; o.x1 = q.x; o.y1 = q.y; return; }
+  if (k === 'p2') { const q = shift ? snapAngle(a.x1, a.y1, p.x, p.y) : p; o.x2 = q.x; o.y2 = q.y; return; }
+  if (o.type === 'text') {
+    const L = textLayout(a);
+    const textW = Math.max(1, L.w - a.padding * 2);
+    o.fontSize = clamp(Math.round(a.fontSize * (p.x - a.x - a.padding * 2) / textW), 6, 400);
+    return;
+  }
+  const b = norm(a);
+  let x1 = b.x, y1 = b.y, x2 = b.x + b.w, y2 = b.y + b.h;
+  if (k.includes('w')) x1 = p.x;
+  if (k.includes('e')) x2 = p.x;
+  if (k.includes('n')) y1 = p.y;
+  if (k.includes('s')) y2 = p.y;
+  o.x = x1; o.y = y1; o.w = x2 - x1; o.h = y2 - y1;
+}
+function finishDrag() {
+  if (!drag) return;
+  const d = drag; drag = null;
+  const o = sel();
+  if (!o) return;
+  if (o.w !== undefined && o.type !== 'text' && o.type !== 'step') Object.assign(o, norm(o));
+  if (d.mode === 'create') {
+    const tiny = 'x1' in o ? Math.hypot(o.x2 - o.x1, o.y2 - o.y1) * zoom < 4 : (o.w * zoom < 4 || o.h * zoom < 4);
+    if (tiny) { objects = objects.filter(x => x !== o); selId = null; }
+    else { pushHistory('Add ' + NAMES[o.type].toLowerCase()); selectMode(); }
+  } else if (d.mode === 'move') {
+    if (d.moved) pushHistory(d.label);
+  } else {
+    pushHistory((o.type === 'text' ? 'Resize ' : 'Reshape ') + NAMES[o.type].toLowerCase());
+  }
+  refreshPanel(); render();
+}
+cv.addEventListener('pointerup', finishDrag);
+cv.addEventListener('pointercancel', finishDrag);
+cv.addEventListener('pointerleave', () => { if (!drag && hoverId != null) { hoverId = null; render(); } });
+cv.addEventListener('dblclick', e => {
+  if (!base || tool !== 'select') return;
+  const p = pt(e), o = hitTest(p);
+  if (o && o.type === 'text') startEdit(o, false);
+  else if (!o) {
+    const st = styles.text;
+    startEdit(newObj('text', { x: p.x - st.padding, y: p.y - st.fontSize * 0.625 - st.padding, text: '' }), true);
+  }
+});
+function updateHover(p) {
+  let cursor = null, h = null;
+  const s = sel();
+  if (s) { const k = hitHandle(s, p); if (k) cursor = CURSORS[k]; }
+  if (!cursor) {
+    if (tool === 'select') {
+      const o = hitTest(p);
+      h = o ? o.id : null;
+      cursor = o ? 'move' : 'default';
+    } else if (tool === 'text') {
+      const o = hitTest(p);
+      cursor = 'text';
+      if (o && o.type === 'text') h = o.id;
+    } else cursor = 'crosshair';
+  }
+  cv.style.cursor = cursor;
+  if (h !== hoverId) { hoverId = h; render(); }
+}
+
+// ---------- properties panel ----------
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function setProp(key, val, commit) {
+  const o = sel();
+  const type = o ? o.type : tool;
+  if (o) o[key] = val;
+  if (styles[type] && !CTRL[key]?.noStyle) { styles[type][key] = val; saveStyles(); }
+  if (editing) styleEditor();
+  render();
+  if (commit && o && !editing) pushHistory(`${NAMES[o.type]}: ${(CTRL[key]?.label || key).toLowerCase()}`, o.id + ':' + key);
+}
+function buildControl(key, t) {
+  const d = CTRL[key];
+  const row = el('div', 'row');
+  const lab = el('label', 'lab', d.label);
+  row.append(lab);
+  switch (d.kind) {
+    case 'color': {
+      const wrap = el('div', 'swatches');
+      for (const c of SWATCHES) {
+        const b = el('button', 'sw' + (t[key].toLowerCase() === c ? ' on' : ''));
+        b.style.background = c; b.title = c;
+        b.onclick = () => { setProp(key, c, true); refreshPanel(); };
+        wrap.append(b);
+      }
+      const inp = el('input');
+      inp.type = 'color'; inp.value = t[key]; inp.title = 'Custom color';
+      inp.oninput = () => setProp(key, inp.value, false);
+      inp.onchange = () => { setProp(key, inp.value, true); refreshPanel(); };
+      wrap.append(inp);
+      row.append(wrap);
+      break;
+    }
+    case 'range': {
+      const wrap = el('div', 'rangeRow');
+      const inp = el('input'), fmt = d.fmt || (v => String(v));
+      const min = d.minFor && t.type in d.minFor ? d.minFor[t.type] : d.min;
+      Object.assign(inp, { type: 'range', min, max: d.max, step: d.step });
+      inp.value = t[key];
+      const out = el('span', 'val', fmt(t[key]));
+      inp.oninput = () => { out.textContent = fmt(+inp.value); setProp(key, +inp.value, false); };
+      inp.onchange = () => setProp(key, +inp.value, true);
+      wrap.append(inp, out);
+      row.append(wrap);
+      break;
+    }
+    case 'seg': {
+      const wrap = el('div', 'seg');
+      for (const [v, label] of d.options) {
+        const b = el('button', t[key] === v ? 'on' : '');
+        b.innerHTML = label; b.title = v;
+        b.onclick = () => { setProp(key, v, true); refreshPanel(); };
+        wrap.append(b);
+      }
+      row.append(wrap);
+      break;
+    }
+    case 'toggle': {
+      row.className = 'row rowInline';
+      const b = el('button', 'switch' + (t[key] ? ' on' : ''));
+      b.onclick = () => { setProp(key, !t[key], true); refreshPanel(); };
+      row.append(b);
+      break;
+    }
+    case 'select': {
+      const s = el('select');
+      for (const [v, label] of d.options) { const op = el('option', '', label); op.value = v; s.append(op); }
+      s.value = t[key];
+      s.onchange = () => { setProp(key, s.value, true); if (editing) ta.focus(); };
+      row.append(s);
+      break;
+    }
+    case 'number': {
+      const inp = el('input');
+      inp.type = 'number'; inp.min = 0; inp.value = t[key];
+      inp.oninput = () => setProp(key, inp.value, false);
+      inp.onchange = () => setProp(key, inp.value, true);
+      row.append(inp);
+      break;
+    }
+    case 'format': {
+      const wrap = el('div', 'seg');
+      const fmts = [['bold', 'B', 'font-weight:800'], ['italic', 'I', 'font-style:italic;font-family:Georgia,serif'],
+                    ['underline', 'U', 'text-decoration:underline'], ['strike', 'S', 'text-decoration:line-through']];
+      for (const [k, label, css] of fmts) {
+        const b = el('button', t[k] ? 'on' : '');
+        b.innerHTML = `<span style="${css};font-size:14px">${label}</span>`;
+        b.title = k;
+        b.onclick = () => { setProp(k, !t[k], true); refreshPanel(); };
+        wrap.append(b);
+      }
+      row.append(wrap);
+      break;
+    }
+  }
+  return row;
+}
+function refreshPanel() {
+  const props = $('#props'), title = $('#propsTitle');
+  props.innerHTML = '';
+  const o = sel();
+  const type = o ? o.type : (tool !== 'select' ? tool : null);
+  if (!base) {
+    title.textContent = 'Properties';
+    props.append(el('p', 'hint', 'Paste or open a screenshot to start annotating.'));
+    return;
+  }
+  if (tool === 'canvas') {
+    title.innerHTML = '';
+    title.append('Canvas', el('span', 'muted', `${frame.w} × ${frame.h}`));
+    buildCanvasPanel(props);
+    return;
+  }
+  if (!type) {
+    title.textContent = 'Properties';
+    props.append(el('p', 'hint', 'Select an annotation to edit it, or pick a tool to draw. Double-click empty space to add text.'));
+    const a = el('div', 'actions');
+    const rc = el('button', 'btn', 'Resize canvas…');
+    rc.style.gridColumn = '1 / -1';
+    rc.onclick = () => setTool('canvas');
+    a.append(rc);
+    if (objects.length) {
+      const b = el('button', 'btn danger', 'Clear all annotations');
+      b.style.gridColumn = '1 / -1';
+      b.onclick = () => { objects = []; selId = null; pushHistory('Clear all'); refreshPanel(); render(); };
+      a.append(b);
+    }
+    props.append(a);
+    return;
+  }
+  const t = o || { type, ...styles[type] };
+  title.innerHTML = '';
+  title.append(NAMES[type], el('span', 'muted', o ? 'selected' : 'new drawings'));
+  for (const key of PROPS[type]) {
+    const d = CTRL[key];
+    if (d.showIf && !d.showIf(t)) continue;
+    if (d.noStyle && !o) continue;
+    props.append(buildControl(key, t));
+  }
+  if (o) {
+    const a = el('div', 'actions');
+    const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
+    if (o.type === 'text') mk('Edit text', () => startEdit(o, false));
+    mk('Duplicate', duplicate);
+    mk('Bring to front', () => reorder(1));
+    mk('Send to back', () => reorder(-1));
+    mk('Delete', del, 'danger');
+    props.append(a);
+  }
+}
+
+// ---------- object actions ----------
+function del() {
+  const o = sel();
+  if (!o) return;
+  commitEdit();
+  if (!get(o.id)) return;
+  objects = objects.filter(x => x !== o);
+  selId = null;
+  pushHistory('Delete ' + NAMES[o.type].toLowerCase());
+  refreshPanel(); render();
+}
+function duplicate() {
+  const o = sel();
+  if (!o) return;
+  commitEdit();
+  const c = clone(o), off = 20;
+  c.id = nextId++;
+  if ('x1' in c) { c.x1 += off; c.y1 += off; c.x2 += off; c.y2 += off; } else { c.x += off; c.y += off; }
+  objects.push(c); selId = c.id;
+  pushHistory('Duplicate ' + NAMES[c.type].toLowerCase());
+  refreshPanel(); render();
+}
+function reorder(dir) {
+  const o = sel();
+  if (!o) return;
+  objects = objects.filter(x => x !== o);
+  dir > 0 ? objects.push(o) : objects.unshift(o);
+  pushHistory(dir > 0 ? 'Bring to front' : 'Send to back');
+  render();
+}
+function nudge(dx, dy) {
+  const o = sel();
+  if (!o) return;
+  if ('x1' in o) { o.x1 += dx; o.y1 += dy; o.x2 += dx; o.y2 += dy; } else { o.x += dx; o.y += dy; }
+  pushHistory('Nudge ' + NAMES[o.type].toLowerCase(), 'nudge:' + o.id);
+  render();
+}
+function setTool(t) {
+  commitEdit();
+  tool = t;
+  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  const s = sel();
+  if (s && t !== 'select' && s.type !== t) selId = null;
+  cv.style.cursor = t === 'select' || t === 'canvas' ? 'default' : t === 'text' ? 'text' : 'crosshair';
+  resetFrameRect();
+  updateFrameBox();
+  refreshPanel(); render();
+}
+// After drawing something, go back to Select (keeping it selected) without ending a text edit.
+function selectMode() {
+  tool = 'select';
+  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === 'select'));
+  cv.style.cursor = 'default';
+  refreshPanel();
+}
+
+// ---------- wiring ----------
+document.querySelectorAll('.tool').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+$('#undoBtn').onclick = undo;
+$('#redoBtn').onclick = redo;
+$('#zoomIn').onclick = () => zoomStep(1);
+$('#zoomOut').onclick = () => zoomStep(-1);
+$('#zoomLabel').onclick = fit;
+$('#copyBtn').onclick = copyImage;
+$('#saveBtn').onclick = saveImage;
+$('#projBtn').onclick = saveProject;
+$('#libBtn').onclick = openLibrary;
+$('#libClose').onclick = closeLibrary;
+$('#libModal').onclick = e => { if (e.target === e.currentTarget) closeLibrary(); };
+$('#libClear').onclick = async () => {
+  if (!confirm('Remove all images from the local library? Your current image stays open.')) return;
+  try { await DB.clear(); } catch (e) {}
+  renderLibrary($('#libGrid'));
+};
+$('#openBtn').onclick = $('#emptyOpen').onclick = () => $('#fileInput').click();
+$('#fileInput').onchange = e => { loadFile(e.target.files[0]); e.target.value = ''; };
+$('#emptyBlank').onclick = () => {
+  const c = document.createElement('canvas');
+  c.width = 1600; c.height = 1000;
+  openDoc(c, { name: 'Blank canvas', label: 'Blank canvas' });
+};
+for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel']) $(b).disabled = true;
+
+document.addEventListener('paste', e => {
+  if (editing || e.target.closest?.('input, textarea, select')) return;
+  const items = e.clipboardData ? [...e.clipboardData.items] : [];
+  const img = items.find(it => it.type.startsWith('image/'));
+  if (img) { e.preventDefault(); loadFile(img.getAsFile()); return; }
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (text && base) {
+    e.preventDefault();
+    const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
+    const x = clamp((r.left + r.width / 2 - c.left) / zoom, 0, frame.w - 50);
+    const y = clamp((r.top + r.height / 2 - c.top) / zoom, 0, frame.h - 50);
+    newObj('text', { x, y, text });
+    pushHistory('Paste text');
+    selectMode(); render();
+  }
+});
+window.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  document.body.classList.remove('dragging');
+  const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/') || /\.(sshot|json)$/i.test(f.name));
+  if (f) { closeLibrary(); loadFile(f); }
+});
+stage.addEventListener('wheel', e => {
+  if (!base || !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  zoomAt(zoom * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+}, { passive: false });
+
+const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', n: 'step', p: 'redact', c: 'canvas' };
+document.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+  if (!$('#libModal').hidden) {
+    if (e.key === 'Escape') closeLibrary();
+    return;
+  }
+  if (mod && k === 'o') { e.preventDefault(); commitEdit(); $('#fileInput').click(); return; }
+  if (editing) {
+    if (e.key === 'Escape' || (e.key === 'Enter' && mod)) { e.preventDefault(); commitEdit(); }
+    return;
+  }
+  const tgt = e.target;
+  if (tgt.closest && tgt.closest('textarea, select, input:not([type=range]):not([type=color])')) return;
+  if (tgt.type === 'range' && e.key.startsWith('Arrow')) return;
+
+  if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+  if (mod && k === 's') { e.preventDefault(); e.shiftKey ? saveProject() : saveImage(); return; }
+  if (mod && k === 'c') {
+    if (String(window.getSelection())) return;
+    e.preventDefault(); copyImage(); return;
+  }
+  if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+  if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); return; }
+  if (mod && k === '-') { e.preventDefault(); zoomStep(-1); return; }
+  if (mod && k === '0') { e.preventDefault(); fit(); return; }
+  if (mod && k === '1') { e.preventDefault(); setZoom(1); return; }
+  if (mod || e.altKey) return;
+
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return; }
+  if (e.key === 'Escape') {
+    if (drag) return;
+    if (selId != null) { selId = null; refreshPanel(); render(); } else setTool('select');
+    return;
+  }
+  if (e.key === 'Enter') { const o = sel(); if (o && o.type === 'text') { e.preventDefault(); startEdit(o, false); } return; }
+  const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  if (arrows[e.key] && sel()) {
+    e.preventDefault();
+    const m = e.shiftKey ? 10 : 1;
+    nudge(arrows[e.key][0] * m, arrows[e.key][1] * m);
+    return;
+  }
+  if (e.key === ']') { reorder(1); return; }
+  if (e.key === '[') { reorder(-1); return; }
+  if (TOOL_KEYS[k] && base) { setTool(TOOL_KEYS[k]); return; }
+});
+
+// flush pending autosave when leaving
+window.addEventListener('pagehide', () => { if (saveT) { clearTimeout(saveT); saveDoc(); } });
+
+setTool('select');
+renderHistory();
+renderEmptyRecent();
+</script>
+</body>
+</html>

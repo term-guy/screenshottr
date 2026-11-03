@@ -621,7 +621,76 @@ function drawImageObj(c, o) {
     return;
   }
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
-  c.drawImage(a.img, b.x, b.y, b.w, b.h);
+  const k = o.crop || { x: 0, y: 0, w: a.img.width, h: a.img.height };
+  c.drawImage(a.img, k.x, k.y, k.w, k.h, b.x, b.y, b.w, b.h);
+}
+// ---------- image crop ----------
+// o.crop = { x, y, w, h } is the visible part of the original pixels (whole image when absent);
+// the object's x/y/w/h is where that part is drawn. Cropping never changes the pixels.
+let cropping = null;     // { id, before } while an image's crop is being edited
+const cropOf = o => o.crop || { x: 0, y: 0, w: o.iw, h: o.ih };
+// Where the whole original image lies on the canvas at the object's current scale.
+function fullRect(o) {
+  const k = cropOf(o), sx = o.w / k.w, sy = o.h / k.h;
+  return { x: o.x - k.x * sx, y: o.y - k.y * sy, w: o.iw * sx, h: o.ih * sy, sx, sy };
+}
+// Set the visible part from a canvas rectangle inside fullRect f, snapped to whole source pixels.
+function setCropRect(o, f, x1, y1, x2, y2) {
+  const cx = clamp(Math.round((x1 - f.x) / f.sx), 0, o.iw - 1), cy = clamp(Math.round((y1 - f.y) / f.sy), 0, o.ih - 1);
+  const cw = clamp(Math.round((x2 - f.x) / f.sx), cx + 1, o.iw) - cx, ch = clamp(Math.round((y2 - f.y) / f.sy), cy + 1, o.ih) - cy;
+  o.crop = { x: cx, y: cy, w: cw, h: ch };
+  o.x = f.x + cx * f.sx; o.y = f.y + cy * f.sy; o.w = cw * f.sx; o.h = ch * f.sy;
+}
+function applyCropHandle(o, a, k, p) {
+  const f = fullRect(a);
+  let x1 = a.x, y1 = a.y, x2 = a.x + a.w, y2 = a.y + a.h;
+  if (k.includes('w')) x1 = clamp(p.x, f.x, x2 - f.sx);
+  if (k.includes('e')) x2 = clamp(p.x, x1 + f.sx, f.x + f.w);
+  if (k.includes('n')) y1 = clamp(p.y, f.y, y2 - f.sy);
+  if (k.includes('s')) y2 = clamp(p.y, y1 + f.sy, f.y + f.h);
+  setCropRect(o, f, x1, y1, x2, y2);
+}
+// Drag inside the crop: the window slides over the image, the image stays where it is.
+function panCrop(o, a, dx, dy) {
+  const f = fullRect(a);
+  const nx = clamp(a.x + dx, f.x, f.x + f.w - a.w), ny = clamp(a.y + dy, f.y, f.y + f.h - a.h);
+  setCropRect(o, f, nx, ny, nx + a.w, ny + a.h);
+}
+function startCrop(o) {
+  if (!o || o.type !== 'image' || !o.iw || !assets.has(o.src)) return;
+  commitEdit();
+  if (cropping) endCrop(true);
+  Object.assign(o, norm(o));
+  cropping = { id: o.id, before: clone(o) };
+  selId = o.id;
+  selectMode(); render();
+}
+// Leave crop editing: apply (one undo step) or put the image back as it was.
+function endCrop(apply) {
+  if (!cropping) return;
+  const { id, before } = cropping; cropping = null;
+  const i = objects.findIndex(x => x.id === id);
+  if (i >= 0) {
+    const o = objects[i];
+    if (!apply) objects[i] = before;
+    else {
+      if (o.crop && !o.crop.x && !o.crop.y && o.crop.w === o.iw && o.crop.h === o.ih) delete o.crop;
+      if (JSON.stringify(o) !== JSON.stringify(before)) pushHistory('Crop image');
+    }
+  }
+  refreshPanel(); render();
+}
+function drawCropGhost(c, o) {   // the cut-off parts, faded, while cropping
+  const a = assets.get(o.src);
+  if (!a) return;
+  const f = fullRect(o);
+  c.save();
+  c.globalAlpha = 0.3 * (o.opacity ?? 1);
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  c.drawImage(a.img, f.x, f.y, f.w, f.h);
+  c.globalAlpha = 1; c.strokeStyle = 'rgba(128,128,128,.9)'; c.lineWidth = 1 / zoom; c.setLineDash([3 / zoom, 3 / zoom]);
+  c.strokeRect(f.x, f.y, f.w, f.h);
+  c.restore();
 }
 function drawRedact(c, o) {
   const b = norm(o);
@@ -725,7 +794,11 @@ function render() {
     if (!base) return;
     ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.drawImage(page, 0, 0);
-    for (const o of objects) if (!(editing && editing.id === o.id)) drawObj(ctx, o);
+    for (const o of objects) {
+      if (editing && editing.id === o.id) continue;
+      if (cropping && cropping.id === o.id) drawCropGhost(ctx, o);
+      drawObj(ctx, o);
+    }
     drawOverlay(ctx);
   });
 }
@@ -749,6 +822,7 @@ function pushHistory(label, mergeKey) {
 }
 function gotoHistory(i) {
   commitEdit();
+  endCrop(false);
   if (i < 0 || i >= hist.length || i === hIdx) return;
   hIdx = i;
   const h = hist[i], s = JSON.parse(h.state);
@@ -800,6 +874,7 @@ function rebuildPage() {
 // Show a document: an image plus (optionally) its saved canvas frame and annotations.
 function openDoc(img, { frame: f, objects: objs = [], id, name, label }) {
   commitEdit();
+  cropping = null;
   base = img;
   frame = f ? { ...f } : { w: img.width, h: img.height, ox: 0, oy: 0, bg: '#ffffff' };
   objects = clone(objs);
@@ -877,6 +952,14 @@ async function addImageObject(blob, label = 'Paste image') {
     toast('Could not paste that image');
   }
 }
+// A new document from an image: a canvas of the image's size with the image on it as an image
+// object at 1:1, so it can be moved, resized, cropped and reordered like any pasted image.
+function openImageDoc(img, blob, opts) {
+  const blank = document.createElement('canvas');
+  blank.width = img.width; blank.height = img.height;
+  const src = addAsset(img, blob);
+  openDoc(blank, { ...opts, objects: [{ id: nextId++, type: 'image', opacity: 1, x: 0, y: 0, w: img.width, h: img.height, src, iw: img.width, ih: img.height }] });
+}
 async function loadFile(file) {
   if (!file) return;
   try {
@@ -885,7 +968,7 @@ async function loadFile(file) {
     const img = await blobToImage(file);
     const pasted = !file.name || file.name === 'image.png';
     const name = pasted ? 'Screenshot ' + new Date().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : file.name;
-    openDoc(img, { name, label: pasted ? 'Pasted image' : 'Opened ' + name });
+    openImageDoc(img, file, { name, label: pasted ? 'Pasted image' : 'Opened ' + name });
   } catch (e) {
     console.error(e);
     toast('Could not open that file');
@@ -1085,7 +1168,7 @@ async function renderLibrary(container, limit) {
     im.src = rec.thumb; im.alt = '';
     th.append(im);
     const meta = el('div', 'meta');
-    const n = rec.objects ? rec.objects.length : 0;
+    const n = rec.objects ? rec.objects.filter(o => o.type !== 'image').length : 0;   // annotations, not the images
     meta.append(el('b', '', rec.name || 'Untitled'),
       el('span', '', `${rec.frame.w} × ${rec.frame.h} · ${n} annotation${n === 1 ? '' : 's'} · ${ago(rec.updated)}`));
     const x = el('button', 'x', '×');
@@ -1368,6 +1451,12 @@ cv.addEventListener('pointerdown', e => {
   const p = pt(e);
   cv.setPointerCapture(e.pointerId);
 
+  if (cropping) {   // handles trim the crop, a drag inside slides it, a click elsewhere applies it
+    const o = get(cropping.id), k = o && hitHandle(o, p);
+    if (k) { drag = { mode: 'crop', k, start: p, orig: clone(o) }; return; }
+    if (o && inBox(p, norm(o))) { drag = { mode: 'crop-pan', start: p, orig: clone(o) }; return; }
+    endCrop(true);
+  }
   const s = sel();
   if (s) {
     const k = hitHandle(s, p);
@@ -1428,6 +1517,10 @@ cv.addEventListener('pointermove', e => {
     }
   } else if (drag.mode === 'handle') {
     applyHandle(o, drag.orig, drag.k, p, e.shiftKey);
+  } else if (drag.mode === 'crop') {
+    applyCropHandle(o, drag.orig, drag.k, p);
+  } else if (drag.mode === 'crop-pan') {
+    panCrop(o, drag.orig, dx, dy);
   }
   render();
 });
@@ -1460,6 +1553,7 @@ function finishDrag() {
   const d = drag; drag = null;
   const o = sel();
   if (!o) return;
+  if (d.mode === 'crop' || d.mode === 'crop-pan') { refreshPanel(); render(); return; }   // one undo step when the crop is applied
   if (o.w !== undefined && o.type !== 'text' && o.type !== 'step') Object.assign(o, norm(o));
   if (d.mode === 'create') {
     const tiny = 'x1' in o ? Math.hypot(o.x2 - o.x1, o.y2 - o.y1) * zoom < 4 : (o.w * zoom < 4 || o.h * zoom < 4);
@@ -1477,8 +1571,10 @@ cv.addEventListener('pointercancel', finishDrag);
 cv.addEventListener('pointerleave', () => { if (!drag && hoverId != null) { hoverId = null; render(); } });
 cv.addEventListener('dblclick', e => {
   if (!base || tool !== 'select') return;
+  if (cropping) return;
   const p = pt(e), o = hitTest(p);
   if (o && o.type === 'text') startEdit(o, false);
+  else if (o && o.type === 'image') startCrop(o);
   else if (!o) {
     const st = styles.text;
     startEdit(newObj('text', { x: p.x - st.padding, y: p.y - st.fontSize * 0.625 - st.padding, text: '' }), true);
@@ -1666,16 +1762,34 @@ function refreshPanel() {
     const a = el('div', 'actions');
     const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
     if (o.type === 'text') mk('Edit text', () => startEdit(o, false));
+    if (o.type === 'image' && cropping && cropping.id === o.id) {
+      props.append(el('p', 'hint', 'Drag the handles to crop, or drag inside to move the crop over the image. Enter or click outside to apply, Esc to cancel.'));
+      mk('Apply crop', () => endCrop(true));
+      mk('Cancel', () => endCrop(false));
+      if (o.crop) mk('Whole image', () => { setCropRect(o, fullRect(o), -Infinity, -Infinity, Infinity, Infinity); refreshPanel(); render(); });
+      props.append(a);
+      return;
+    }
     if (o.type === 'image' && o.iw && o.ih) {
-      mk('1:1', () => {   // back to the original size, keeping the image's centre
+      const k = cropOf(o);
+      mk('1:1', () => {   // the visible part at its original pixel size, keeping the image's centre
         const b = norm(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-        Object.assign(o, { x: Math.round(cx - o.iw / 2), y: Math.round(cy - o.ih / 2), w: o.iw, h: o.ih });
+        Object.assign(o, { x: Math.round(cx - k.w / 2), y: Math.round(cy - k.h / 2), w: k.w, h: k.h });
         pushHistory('Image: 1:1 size');
         refreshPanel(); render();
       });
-      const b = a.lastChild, one = Math.abs(o.w) === o.iw && Math.abs(o.h) === o.ih;
-      b.title = `Original size ${o.iw} × ${o.ih}` + (one ? ' (already 1:1)' : '');
+      const b = a.lastChild, one = Math.abs(o.w) === k.w && Math.abs(o.h) === k.h;
+      b.title = `Original size ${k.w} × ${k.h}` + (one ? ' (already 1:1)' : '');
       b.disabled = one;
+      mk('Crop', () => startCrop(o));
+      a.lastChild.title = 'Crop the image (or double-click it)';
+      if (o.crop) mk('Reset crop', () => {   // whole image back, at the same scale, cropped part staying put
+        const f = fullRect(o);
+        Object.assign(o, { x: f.x, y: f.y, w: f.w, h: f.h });
+        delete o.crop;
+        pushHistory('Reset crop');
+        refreshPanel(); render();
+      });
     }
     if (o.type === 'text' && o.wrapW) mk('Auto width', () => {
       delete o.wrapW;
@@ -1761,6 +1875,7 @@ function nudge(dx, dy) {
 }
 function setTool(t) {
   commitEdit();
+  endCrop(true);
   tool = t;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
   const s = sel();
@@ -1921,6 +2036,11 @@ document.addEventListener('keydown', e => {
   if (mod && k === '1') { e.preventDefault(); zoomTo(1); return; }
   if (mod || e.altKey) return;
 
+  if (cropping) {   // while cropping only Enter (apply) and Esc (cancel) act
+    if (e.key === 'Enter') { e.preventDefault(); endCrop(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); endCrop(false); }
+    return;
+  }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return; }
   if (e.key === 'Escape') {
     if (drag) return;

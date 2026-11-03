@@ -5,6 +5,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 ## Features
 
 - **Paste, drop, or open**: paste with `⌘V` / `Ctrl V`, drag an image onto the window, or start from a blank canvas
+- **Combine images**: once a screenshot is open, every image you paste becomes its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size. `⇧⌘V` starts a new document from the clipboard instead
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
@@ -46,7 +47,8 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Resize canvas | `C` |
 | Open image or project | `⌘O` |
 | Copy selected annotation | `⌘C` |
-| Paste annotation | `⌘V` |
+| Paste annotation, or an image as a new object | `⌘V` |
+| Paste an image as a new document | `⇧⌘V` |
 | Copy image to clipboard (nothing selected) | `⌘C` |
 | Export PNG | `⌘S` |
 | Save `.sshot` project | `⇧⌘S` |

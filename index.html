@@ -321,7 +321,7 @@ const FONTS = {
   hand: '"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive',
 };
 const SWATCHES = ['#ff3b30', '#ff9f0a', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#1c1c1e'];
-const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', step: 'Step', redact: 'Redact', canvas: 'Canvas' };
+const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
 const BG_SWATCHES = ['#ffffff', '#f2f2f7', '#d1d1d6', '#1c1c1e', '#000000', '#0a84ff', '#ff3b30', '#ffd60a'];
 const ACCENT = '#4c8dff';
 const HANDLE = 9;
@@ -335,6 +335,7 @@ const DEFAULTS = {
              align: 'left', outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
   step:    { color: '#ff3b30', textColor: '#ffffff', size: 40, opacity: 1 },
   redact:  { mode: 'pixelate', strength: 12 },
+  image:   { opacity: 1 },
 };
 const PROPS = {
   arrow:   ['color', 'width', 'heads', 'headStyle', 'dash', 'opacity'],
@@ -344,6 +345,7 @@ const PROPS = {
   text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
   step:    ['n', 'color', 'textColor', 'size', 'opacity'],
   redact:  ['mode', 'strength'],
+  image:   ['opacity'],
 };
 const alignIcon = a => `<svg viewBox="0 0 22 14"><path d="M3 2h16M${[3, 6, 9][a]} 7h10M${[3, 4.5, 6][a]} 12h13"/></svg>`;
 const headIcon = (l, r) => `<svg viewBox="0 0 22 14"><path d="M3 7h16"/>${l ? '<path d="M7 3L3 7l4 4"/>' : ''}${r ? '<path d="M15 3l4 4-4 4"/>' : ''}</svg>`;
@@ -389,6 +391,10 @@ let editing = null;      // { id, isNew }
 let drag = null;
 let hist = [], hIdx = -1;
 let styles = loadStyles();
+// Pixels of pasted images. Image objects stay plain JSON (history, projects, library) and
+// name their pixels by key: o.src -> { img, blob }. Entries are never removed while the page
+// is open, so undo/redo and copy/paste between documents keep working.
+const assets = new Map();
 
 function loadStyles() {
   const s = JSON.parse(JSON.stringify(DEFAULTS));
@@ -594,9 +600,32 @@ function drawText(c, o) {
     if (o.strike) c.fillRect(tx, cy - th / 2 + o.fontSize * 0.04, lw, th);
   });
 }
-const redactTmp = document.createElement('canvas');
+const redactTmp = document.createElement('canvas'), redactSrc = document.createElement('canvas');
+// What a redaction hides: the page, plus any pasted images beneath it.
+function redactSource(o) {
+  const i = objects.indexOf(o);
+  const below = objects.slice(0, i < 0 ? objects.length : i).filter(x => x.type === 'image');
+  if (!below.length) return page;
+  redactSrc.width = page.width; redactSrc.height = page.height;
+  const x = redactSrc.getContext('2d');
+  x.drawImage(page, 0, 0);
+  for (const b of below) drawObj(x, b);
+  return redactSrc;
+}
+function drawImageObj(c, o) {
+  const b = norm(o), a = assets.get(o.src);
+  if (!a) {   // pixels not available (e.g. pasted from a project that was not saved with them)
+    c.fillStyle = 'rgba(128,128,128,.25)'; c.fillRect(b.x, b.y, b.w, b.h);
+    c.strokeStyle = 'rgba(128,128,128,.8)'; c.lineWidth = 2; c.strokeRect(b.x, b.y, b.w, b.h);
+    c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(b.x + b.w, b.y + b.h); c.moveTo(b.x + b.w, b.y); c.lineTo(b.x, b.y + b.h); c.stroke();
+    return;
+  }
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  c.drawImage(a.img, b.x, b.y, b.w, b.h);
+}
 function drawRedact(c, o) {
   const b = norm(o);
+  const src = redactSource(o);
   const W = page.width, H = page.height;
   const x = clamp(Math.round(b.x), 0, W), y = clamp(Math.round(b.y), 0, H);
   const w = clamp(Math.round(b.x + b.w), 0, W) - x, h = clamp(Math.round(b.y + b.h), 0, H) - y;
@@ -609,7 +638,7 @@ function drawRedact(c, o) {
     c.filter = `blur(${o.strength}px)`;
     const sx = Math.max(0, x - p), sy = Math.max(0, y - p);
     const sw = Math.min(W, x + w + p) - sx, sh = Math.min(H, y + h + p) - sy;
-    c.drawImage(page, sx, sy, sw, sh, sx, sy, sw, sh);
+    c.drawImage(src, sx, sy, sw, sh, sx, sy, sw, sh);
     c.restore();
     return;
   }
@@ -617,7 +646,7 @@ function drawRedact(c, o) {
   redactTmp.width = sw; redactTmp.height = sh;
   const t = redactTmp.getContext('2d');
   t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'medium';
-  t.drawImage(page, x, y, w, h, 0, 0, sw, sh);
+  t.drawImage(src, x, y, w, h, 0, 0, sw, sh);
   c.imageSmoothingEnabled = false;
   c.drawImage(redactTmp, 0, 0, sw, sh, x, y, w, h);
   c.imageSmoothingEnabled = true;
@@ -656,6 +685,7 @@ function drawObj(c, o) {
       break;
     }
     case 'redact': drawRedact(c, o); break;
+    case 'image': drawImageObj(c, o); break;
   }
   c.restore();
 }
@@ -794,6 +824,59 @@ function blobToImage(blob) {
     img.src = URL.createObjectURL(blob);
   });
 }
+// ---------- pasted images (image objects) ----------
+function addAsset(img, blob) {
+  const key = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  assets.set(key, { img, blob });
+  return key;
+}
+// The pixels an object list needs, keyed by asset: { key: Blob }. Missing assets are skipped.
+async function usedAssets(objs) {
+  const out = {};
+  for (const o of objs) {
+    if (o.type !== 'image' || out[o.src]) continue;
+    const a = assets.get(o.src);
+    if (!a) continue;
+    if (!a.blob) {
+      const c = document.createElement('canvas');
+      c.width = a.img.width; c.height = a.img.height;
+      c.getContext('2d').drawImage(a.img, 0, 0);
+      a.blob = await toBlob(c);
+    }
+    out[o.src] = a.blob;
+  }
+  return out;
+}
+// Restore saved pixels ({ key: Blob or data URL }) into the asset store.
+async function loadAssets(saved) {
+  for (const [key, v] of Object.entries(saved || {})) {
+    if (assets.has(key)) continue;
+    try {
+      const blob = typeof v === 'string' ? dataURLToBlob(v) : v;
+      assets.set(key, { img: await blobToImage(blob), blob });
+    } catch (e) { console.warn('Could not load image', key, e); }
+  }
+}
+// Add an image to the open document as its own object, always at its original 1:1 size,
+// centred in the visible part of the canvas, and selected. Its original pixels stay in the
+// asset store untouched (and are saved with projects and the library), and iw/ih record its
+// original size, so it can be returned to 1:1 after resizing.
+async function addImageObject(blob, label = 'Paste image') {
+  try {
+    const img = await blobToImage(blob);
+    const w = img.width, h = img.height;
+    const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
+    const cx = clamp((r.left + r.width / 2 - c.left) / zoom, w / 2, Math.max(w / 2, frame.w - w / 2));
+    const cy = clamp((r.top + r.height / 2 - c.top) / zoom, h / 2, Math.max(h / 2, frame.h - h / 2));
+    commitEdit();
+    newObj('image', { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h, src: addAsset(img, blob), iw: img.width, ih: img.height });
+    pushHistory(label);
+    selectMode(); render();
+  } catch (e) {
+    console.error(e);
+    toast('Could not paste that image');
+  }
+}
 async function loadFile(file) {
   if (!file) return;
   try {
@@ -903,8 +986,9 @@ async function saveProject() {
   commitEdit();
   const data = {
     app: 'screenshottr', version: 1, id: docId, name: docName,
-    image: await blobToDataURL(await encodeBase()), frame, objects,
+    image: await blobToDataURL(await encodeBase()), frame, objects, assets: {},
   };
+  for (const [k, b] of Object.entries(await usedAssets(objects))) data.assets[k] = await blobToDataURL(b);
   const name = `${(docName || 'screenshot').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'screenshot'}-${stamp()}.sshot`;
   download(new Blob([JSON.stringify(data)], { type: 'application/json' }), name);
   toast('Saved project ' + name);
@@ -913,6 +997,7 @@ async function loadProject(file) {
   const d = JSON.parse(await file.text());
   if (d.app !== 'screenshottr' || !d.image) throw new Error('Not a Screenshottr project');
   const img = await blobToImage(dataURLToBlob(d.image));
+  await loadAssets(d.assets);
   openDoc(img, { frame: d.frame, objects: d.objects || [], id: d.id, name: d.name, label: 'Opened project' });
 }
 
@@ -963,6 +1048,7 @@ async function saveDoc() {
   const img = base;
   try {
     rec.image = baseBlobs.get(img) || await encodeBase();
+    rec.assets = await usedAssets(rec.objects);
     const prev = await DB.get(rec.id);
     rec.created = prev ? prev.created : rec.updated;
     await DB.put(rec);
@@ -1020,6 +1106,7 @@ async function openRecord(rec) {
   closeLibrary();
   try {
     const img = await blobToImage(rec.image);
+    await loadAssets(rec.assets);
     openDoc(img, { frame: rec.frame, objects: rec.objects, id: rec.id, name: rec.name, label: 'Opened ' + (rec.name || 'image') });
   } catch (e) {
     toast('Could not open that image');
@@ -1357,6 +1444,15 @@ function applyHandle(o, a, k, p, shift) {
   if (k.includes('e')) x2 = p.x;
   if (k.includes('n')) y1 = p.y;
   if (k.includes('s')) y2 = p.y;
+  // Images keep their aspect ratio when dragged by a corner (Shift resizes freely); edge handles stretch.
+  if (o.type === 'image' && k.length === 2 && !shift && b.w > 0 && b.h > 0) {
+    const ar = b.w / b.h;
+    let w = x2 - x1, h = y2 - y1;
+    if (Math.abs(w) / b.w >= Math.abs(h) / b.h) h = (Math.sign(h) || 1) * Math.abs(w) / ar;
+    else w = (Math.sign(w) || 1) * Math.abs(h) * ar;
+    if (k.includes('w')) x1 = x2 - w; else x2 = x1 + w;
+    if (k.includes('n')) y1 = y2 - h; else y2 = y1 + h;
+  }
   o.x = x1; o.y = y1; o.w = x2 - x1; o.h = y2 - y1;
 }
 function finishDrag() {
@@ -1570,6 +1666,17 @@ function refreshPanel() {
     const a = el('div', 'actions');
     const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
     if (o.type === 'text') mk('Edit text', () => startEdit(o, false));
+    if (o.type === 'image' && o.iw && o.ih) {
+      mk('1:1', () => {   // back to the original size, keeping the image's centre
+        const b = norm(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        Object.assign(o, { x: Math.round(cx - o.iw / 2), y: Math.round(cy - o.ih / 2), w: o.iw, h: o.ih });
+        pushHistory('Image: 1:1 size');
+        refreshPanel(); render();
+      });
+      const b = a.lastChild, one = Math.abs(o.w) === o.iw && Math.abs(o.h) === o.ih;
+      b.title = `Original size ${o.iw} × ${o.ih}` + (one ? ' (already 1:1)' : '');
+      b.disabled = one;
+    }
     if (o.type === 'text' && o.wrapW) mk('Auto width', () => {
       delete o.wrapW;
       pushHistory('Text: auto width');
@@ -1629,7 +1736,7 @@ function clipObjectFrom(text) {
   if (!text || text[0] !== '{') return null;
   try {
     const obj = JSON.parse(text)[CLIP_KEY];
-    if (obj && NAMES[obj.type] && obj.type !== 'canvas') return objClip = { obj, text, pastes: 0 };
+    if (obj && NAMES[obj.type] && obj.type !== 'canvas' && (obj.type !== 'image' || assets.has(obj.src))) return objClip = { obj, text, pastes: 0 };
   } catch (e) {}
   return null;
 }
@@ -1715,11 +1822,21 @@ $('#emptyBlank').onclick = () => {
 };
 for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#zoom1', '#zoomFit']) $(b).disabled = true;
 
+let pasteAsNew = false;  // set by ⌘⇧V / Ctrl+Shift+V just before its paste event
 document.addEventListener('paste', e => {
   if (editing || e.target.closest?.('input, textarea, select')) return;
   const items = e.clipboardData ? [...e.clipboardData.items] : [];
   const img = items.find(it => it.type.startsWith('image/'));
-  if (img) { e.preventDefault(); loadFile(img.getAsFile()); return; }
+  if (img) {
+    // With a document open, a pasted image becomes its own movable, resizable object.
+    // ⌘⇧V / Ctrl+Shift+V starts a new document from it instead (as does pasting with nothing open).
+    e.preventDefault();
+    const asNew = pasteAsNew; pasteAsNew = false;
+    if (base && !asNew) addImageObject(img.getAsFile());
+    else loadFile(img.getAsFile());
+    return;
+  }
+  pasteAsNew = false;
   const text = e.clipboardData && e.clipboardData.getData('text/plain');
   const clip = base && clipObjectFrom(text);
   if (clip) { e.preventDefault(); pasteObject(clip); return; }
@@ -1778,6 +1895,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (mod && k === 'o') { e.preventDefault(); commitEdit(); $('#fileInput').click(); return; }
+  if (mod && e.shiftKey && k === 'v') { pasteAsNew = true; setTimeout(() => { pasteAsNew = false; }, 1000); }   // the paste event follows
   if (editing) {
     if (e.key === 'Escape' || (e.key === 'Enter' && mod)) { e.preventDefault(); commitEdit(); }
     return;

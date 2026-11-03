@@ -57,6 +57,12 @@
     width: max-content; height: max-content; padding: 40px;
   }
   #box { position: relative; display: none; }
+  /* Infinite canvas: the canvas element fills the stage and draws a pannable, zoomable view */
+  body.infinite #stage { overflow: hidden; }
+  body.infinite #wrap { display: block; padding: 0; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+  body.infinite #box { width: 100%; height: 100%; }
+  body.infinite #cv { width: 100% !important; height: 100% !important; box-shadow: none; background: none; }
+  body.infinite.panning #cv, body.infinite.spacepan #cv { cursor: grab !important; }
   #cv {
     display: block; position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0,0,0,.45); touch-action: none;
     background: repeating-conic-gradient(#d9d9d9 0 25%, #fff 0 50%) 0 0 / 16px 16px;
@@ -278,6 +284,7 @@
         <p>Press <kbd>⌘V</kbd> / <kbd>Ctrl V</kbd>, or drop an image or <code>.sshot</code> project anywhere.</p>
         <button class="btn primary" id="emptyOpen">Open…</button>
         <button class="btn" id="emptyBlank">Blank canvas</button>
+        <button class="btn" id="emptyInfinite" title="An endless canvas to arrange images and annotations on">Infinite canvas</button>
       </div>
       <div id="emptyRecent"></div>
     </div>
@@ -395,6 +402,58 @@ let styles = loadStyles();
 // name their pixels by key: o.src -> { img, blob }. Entries are never removed while the page
 // is open, so undo/redo and copy/paste between documents keep working.
 const assets = new Map();
+// Infinite canvas documents (frame.infinite): objects live in unbounded world coordinates and the
+// canvas element shows the part of the world starting at (viewX, viewY), scaled by zoom.
+let viewX = 0, viewY = 0, spaceDown = false;
+const isInf = () => !!(frame && frame.infinite);
+const DPR = () => window.devicePixelRatio || 1;
+// Bounds of all objects with room for strokes and arrowheads, or null when there are none.
+function objBounds(pad = 0) {
+  if (!objects.length) return null;
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const o of objects) {
+    const b = bbox(o), q = (o.width || 0) / 2 + (o.type === 'arrow' ? 10 + o.width * 3 : 2);
+    x1 = Math.min(x1, b.x - q); y1 = Math.min(y1, b.y - q); x2 = Math.max(x2, b.x + b.w + q); y2 = Math.max(y2, b.y + b.h + q);
+  }
+  return { x1: Math.floor(x1 - pad), y1: Math.floor(y1 - pad), x2: Math.ceil(x2 + pad), y2: Math.ceil(y2 + pad) };
+}
+// World point at the centre of the visible stage.
+function viewCenter() {
+  const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
+  const x = (r.left + r.width / 2 - c.left) / zoom, y = (r.top + r.height / 2 - c.top) / zoom;
+  return isInf() ? { x: viewX + x, y: viewY + y } : { x, y };
+}
+function clientToWorld(cx, cy) {
+  const r = cv.getBoundingClientRect();
+  return isInf() ? { x: viewX + (cx - r.left) / zoom, y: viewY + (cy - r.top) / zoom }
+                 : { x: (cx - r.left) * cv.width / r.width, y: (cy - r.top) * cv.height / r.height };
+}
+// Match the canvas backing store to its on-screen size (infinite mode).
+function resizeInf() {
+  const r = cv.getBoundingClientRect(), d = DPR();
+  const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  render();
+}
+function panBy(dx, dy) { viewX += dx; viewY += dy; if (editing) styleEditor(); render(); }
+// Body class, toolbar and labels for the kind of document that is open.
+function applyMode() {
+  document.body.classList.toggle('infinite', isInf());
+  const cb = document.querySelector('.tool[data-tool="canvas"]');
+  if (cb) cb.disabled = isInf();
+  if (isInf() && tool === 'canvas') tool = 'select';
+}
+function drawInfBackground(c) {   // screen space: background colour and a dot grid that follows pan and zoom
+  const W = cv.width, H = cv.height, d = DPR();
+  c.fillStyle = frame.bg || '#e9e9ee'; c.fillRect(0, 0, W, H);
+  let g = 24;
+  while (g * zoom < 12) g *= 2;
+  while (g * zoom > 48) g /= 2;
+  const sg = g * zoom * d, r = Math.max(1, d * 1.1);
+  const x0 = (-((viewX % g) + g) % g) * zoom * d, y0 = (-((viewY % g) + g) % g) * zoom * d;
+  c.fillStyle = frame.bg && contrast(frame.bg) === '#ffffff' ? 'rgba(255,255,255,.16)' : 'rgba(0,0,0,.16)';
+  for (let y = y0; y < H; y += sg) for (let x = x0; x < W; x += sg) c.fillRect(x - r / 2, y - r / 2, r, r);
+}
 
 function loadStyles() {
   const s = JSON.parse(JSON.stringify(DEFAULTS));
@@ -602,15 +661,28 @@ function drawText(c, o) {
 }
 const redactTmp = document.createElement('canvas'), redactSrc = document.createElement('canvas');
 // What a redaction hides: the page, plus any pasted images beneath it.
+// { c, ox, oy }: a canvas whose pixel (0, 0) is world point (ox, oy).
 function redactSource(o) {
   const i = objects.indexOf(o);
   const below = objects.slice(0, i < 0 ? objects.length : i).filter(x => x.type === 'image');
-  if (!below.length) return page;
+  if (isInf()) {   // only the redacted region (plus blur margin), from the background and the images beneath
+    const b = norm(o), m = (o.strength || 0) * 2 + 2;
+    const ox = Math.floor(b.x - m), oy = Math.floor(b.y - m);
+    redactSrc.width = Math.max(1, Math.ceil(b.w + m * 2) + 1); redactSrc.height = Math.max(1, Math.ceil(b.h + m * 2) + 1);
+    const x = redactSrc.getContext('2d');
+    x.clearRect(0, 0, redactSrc.width, redactSrc.height);
+    if (frame.bg) { x.fillStyle = frame.bg; x.fillRect(0, 0, redactSrc.width, redactSrc.height); }
+    x.translate(-ox, -oy);
+    for (const im of below) drawObj(x, im);
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    return { c: redactSrc, ox, oy };
+  }
+  if (!below.length) return { c: page, ox: 0, oy: 0 };
   redactSrc.width = page.width; redactSrc.height = page.height;
   const x = redactSrc.getContext('2d');
   x.drawImage(page, 0, 0);
   for (const b of below) drawObj(x, b);
-  return redactSrc;
+  return { c: redactSrc, ox: 0, oy: 0 };
 }
 function drawImageObj(c, o) {
   const b = norm(o), a = assets.get(o.src);
@@ -694,20 +766,21 @@ function drawCropGhost(c, o) {   // the cut-off parts, faded, while cropping
 }
 function drawRedact(c, o) {
   const b = norm(o);
-  const src = redactSource(o);
-  const W = page.width, H = page.height;
-  const x = clamp(Math.round(b.x), 0, W), y = clamp(Math.round(b.y), 0, H);
-  const w = clamp(Math.round(b.x + b.w), 0, W) - x, h = clamp(Math.round(b.y + b.h), 0, H) - y;
+  const { c: src, ox, oy } = redactSource(o);
+  const W = src.width, H = src.height;
+  // x/y/w/h in the source canvas; drawn at x + ox, y + oy in world coordinates
+  const x = clamp(Math.round(b.x - ox), 0, W), y = clamp(Math.round(b.y - oy), 0, H);
+  const w = clamp(Math.round(b.x + b.w - ox), 0, W) - x, h = clamp(Math.round(b.y + b.h - oy), 0, H) - y;
   if (w < 1 || h < 1) return;
-  if (o.mode === 'solid') { c.fillStyle = '#111'; c.fillRect(x, y, w, h); return; }
+  if (o.mode === 'solid') { c.fillStyle = '#111'; c.fillRect(x + ox, y + oy, w, h); return; }
   if (o.mode === 'blur' && 'filter' in c) {
     const p = o.strength * 2;
     c.save();
-    c.beginPath(); c.rect(x, y, w, h); c.clip();
+    c.beginPath(); c.rect(x + ox, y + oy, w, h); c.clip();
     c.filter = `blur(${o.strength}px)`;
     const sx = Math.max(0, x - p), sy = Math.max(0, y - p);
     const sw = Math.min(W, x + w + p) - sx, sh = Math.min(H, y + h + p) - sy;
-    c.drawImage(src, sx, sy, sw, sh, sx, sy, sw, sh);
+    c.drawImage(src, sx, sy, sw, sh, sx + ox, sy + oy, sw, sh);
     c.restore();
     return;
   }
@@ -717,7 +790,7 @@ function drawRedact(c, o) {
   t.imageSmoothingEnabled = true; t.imageSmoothingQuality = 'medium';
   t.drawImage(src, x, y, w, h, 0, 0, sw, sh);
   c.imageSmoothingEnabled = false;
-  c.drawImage(redactTmp, 0, 0, sw, sh, x, y, w, h);
+  c.drawImage(redactTmp, 0, 0, sw, sh, x + ox, y + oy, w, h);
   c.imageSmoothingEnabled = true;
 }
 function drawObj(c, o) {
@@ -792,14 +865,23 @@ function render() {
   raf = requestAnimationFrame(() => {
     raf = 0;
     if (!base) return;
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    ctx.drawImage(page, 0, 0);
+    if (isInf()) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      drawInfBackground(ctx);
+      const k = zoom * DPR();
+      ctx.setTransform(k, 0, 0, k, -viewX * k, -viewY * k);
+    } else {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(page, 0, 0);
+    }
     for (const o of objects) {
       if (editing && editing.id === o.id) continue;
       if (cropping && cropping.id === o.id) drawCropGhost(ctx, o);
       drawObj(ctx, o);
     }
     drawOverlay(ctx);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
 }
 
@@ -831,6 +913,7 @@ function gotoHistory(i) {
   for (const o of objects) nextId = Math.max(nextId, o.id + 1);
   const imageChanged = h.base !== base;
   base = h.base; docId = h.docId; docName = h.docName;
+  applyMode();
   rebuildPage();
   if (imageChanged) fit();
   if (!sel()) selId = null;
@@ -862,6 +945,7 @@ function renderHistory() {
 // ---------- image / canvas ----------
 function rebuildPage() {
   if (!base) return;
+  if (isInf()) { $('#dims').textContent = 'Infinite canvas'; resizeInf(); setZoom(zoom); return; }
   page.width = frame.w; page.height = frame.h;
   const p = page.getContext('2d');
   p.clearRect(0, 0, frame.w, frame.h);
@@ -872,11 +956,12 @@ function rebuildPage() {
   setZoom(zoom);
 }
 // Show a document: an image plus (optionally) its saved canvas frame and annotations.
-function openDoc(img, { frame: f, objects: objs = [], id, name, label }) {
+function openDoc(img, { frame: f, objects: objs = [], id, name, label, view }) {
   commitEdit();
   cropping = null;
   base = img;
   frame = f ? { ...f } : { w: img.width, h: img.height, ox: 0, oy: 0, bg: '#ffffff' };
+  applyMode();
   objects = clone(objs);
   for (const o of objects) nextId = Math.max(nextId, o.id + 1);
   docId = id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -886,7 +971,8 @@ function openDoc(img, { frame: f, objects: objs = [], id, name, label }) {
   $('#box').style.display = 'block';
   for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#zoom1', '#zoomFit']) $(b).disabled = false;
   rebuildPage();
-  fit();
+  if (isInf() && view) { zoom = clamp(view.zoom || 1, 0.05, 8); viewX = view.x || 0; viewY = view.y || 0; setZoom(zoom); }
+  else fit();
   resetFrameRect();
   pushHistory(label || name);
   refreshPanel();
@@ -936,13 +1022,12 @@ async function loadAssets(saved) {
 // centred in the visible part of the canvas, and selected. Its original pixels stay in the
 // asset store untouched (and are saved with projects and the library), and iw/ih record its
 // original size, so it can be returned to 1:1 after resizing.
-async function addImageObject(blob, label = 'Paste image') {
+async function addImageObject(blob, label = 'Paste image', at) {
   try {
     const img = await blobToImage(blob);
-    const w = img.width, h = img.height;
-    const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
-    const cx = clamp((r.left + r.width / 2 - c.left) / zoom, w / 2, Math.max(w / 2, frame.w - w / 2));
-    const cy = clamp((r.top + r.height / 2 - c.top) / zoom, h / 2, Math.max(h / 2, frame.h - h / 2));
+    const w = img.width, h = img.height, vc = at || viewCenter();
+    const cx = isInf() ? vc.x : clamp(vc.x, w / 2, Math.max(w / 2, frame.w - w / 2));
+    const cy = isInf() ? vc.y : clamp(vc.y, h / 2, Math.max(h / 2, frame.h - h / 2));
     commitEdit();
     newObj('image', { x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), w, h, src: addAsset(img, blob), iw: img.width, ih: img.height });
     pushHistory(label);
@@ -977,6 +1062,12 @@ async function loadFile(file) {
 function setZoom(z) {
   if (!base) return;
   zoom = clamp(z, 0.05, 8);
+  if (isInf()) {
+    $('#zoomLabel').value = Math.round(zoom * 100) + '%';
+    if (editing) styleEditor();
+    render();
+    return;
+  }
   cv.style.width = frame.w * zoom + 'px';
   cv.style.height = frame.h * zoom + 'px';
   $('#zoomLabel').value = Math.round(zoom * 100) + '%';
@@ -986,9 +1077,22 @@ function setZoom(z) {
 }
 function fit() {
   if (!base) return;
+  if (isInf()) {   // frame all objects (at most 100%), or the origin at 100% when empty
+    const r = cv.getBoundingClientRect(), b = objBounds(20);
+    if (!b) { zoom = 1; viewX = -r.width / 2; viewY = -r.height / 2; return setZoom(1); }
+    const z = clamp(Math.min(1, (r.width - 80) / (b.x2 - b.x1), (r.height - 80) / (b.y2 - b.y1)), 0.05, 8);
+    zoom = z; viewX = (b.x1 + b.x2) / 2 - r.width / 2 / z; viewY = (b.y1 + b.y2) / 2 - r.height / 2 / z;
+    return setZoom(z);
+  }
   setZoom(Math.min(1, (stage.clientWidth - 80) / frame.w, (stage.clientHeight - 80) / frame.h));
 }
 function zoomAt(z, cx, cy) {
+  if (isInf()) {   // keep the world point under (cx, cy) in place
+    const r = cv.getBoundingClientRect(), w = clientToWorld(cx, cy);
+    zoom = clamp(z, 0.05, 8);
+    viewX = w.x - (cx - r.left) / zoom; viewY = w.y - (cy - r.top) / zoom;
+    return setZoom(zoom);
+  }
   const r = cv.getBoundingClientRect();
   const ix = (cx - r.left) / zoom, iy = (cy - r.top) / zoom;
   setZoom(z);
@@ -1004,6 +1108,15 @@ function zoomTo(z) {
 function zoomStep(dir) { zoomTo(zoom * (dir > 0 ? 1.25 : 0.8)); }
 function exportCanvas() {
   const c = document.createElement('canvas');
+  if (isInf()) {   // everything on the canvas, with a margin; the background colour unless transparent
+    const b = objBounds(24) || { x1: 0, y1: 0, x2: 1, y2: 1 };
+    c.width = b.x2 - b.x1; c.height = b.y2 - b.y1;
+    const x = c.getContext('2d');
+    if (frame.bg) { x.fillStyle = frame.bg; x.fillRect(0, 0, c.width, c.height); }
+    x.translate(-b.x1, -b.y1);
+    for (const o of objects) drawObj(x, o);
+    return c;
+  }
   c.width = frame.w; c.height = frame.h;
   const x = c.getContext('2d');
   x.drawImage(page, 0, 0);
@@ -1071,6 +1184,7 @@ async function saveProject() {
     app: 'screenshottr', version: 1, id: docId, name: docName,
     image: await blobToDataURL(await encodeBase()), frame, objects, assets: {},
   };
+  if (isInf()) data.view = { x: viewX, y: viewY, zoom };
   for (const [k, b] of Object.entries(await usedAssets(objects))) data.assets[k] = await blobToDataURL(b);
   const name = `${(docName || 'screenshot').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'screenshot'}-${stamp()}.sshot`;
   download(new Blob([JSON.stringify(data)], { type: 'application/json' }), name);
@@ -1081,7 +1195,7 @@ async function loadProject(file) {
   if (d.app !== 'screenshottr' || !d.image) throw new Error('Not a Screenshottr project');
   const img = await blobToImage(dataURLToBlob(d.image));
   await loadAssets(d.assets);
-  openDoc(img, { frame: d.frame, objects: d.objects || [], id: d.id, name: d.name, label: 'Opened project' });
+  openDoc(img, { frame: d.frame, objects: d.objects || [], id: d.id, name: d.name, label: 'Opened project', view: d.view });
 }
 
 // ---------- local library (IndexedDB) ----------
@@ -1128,6 +1242,7 @@ async function saveDoc() {
   if (!base || !docId) return;
   // snapshot synchronously; the document may change while we await
   const rec = { id: docId, name: docName, updated: Date.now(), frame: clone(frame), objects: clone(objects), thumb: thumbnail() };
+  if (isInf()) rec.view = { x: viewX, y: viewY, zoom };
   const img = base;
   try {
     rec.image = baseBlobs.get(img) || await encodeBase();
@@ -1170,7 +1285,7 @@ async function renderLibrary(container, limit) {
     const meta = el('div', 'meta');
     const n = rec.objects ? rec.objects.filter(o => o.type !== 'image').length : 0;   // annotations, not the images
     meta.append(el('b', '', rec.name || 'Untitled'),
-      el('span', '', `${rec.frame.w} × ${rec.frame.h} · ${n} annotation${n === 1 ? '' : 's'} · ${ago(rec.updated)}`));
+      el('span', '', `${rec.frame.infinite ? 'Infinite canvas' : rec.frame.w + ' × ' + rec.frame.h} · ${n} annotation${n === 1 ? '' : 's'} · ${ago(rec.updated)}`));
     const x = el('button', 'x', '×');
     x.title = 'Remove from library';
     x.onclick = async ev => {
@@ -1190,7 +1305,7 @@ async function openRecord(rec) {
   try {
     const img = await blobToImage(rec.image);
     await loadAssets(rec.assets);
-    openDoc(img, { frame: rec.frame, objects: rec.objects, id: rec.id, name: rec.name, label: 'Opened ' + (rec.name || 'image') });
+    openDoc(img, { frame: rec.frame, objects: rec.objects, id: rec.id, name: rec.name, label: 'Opened ' + (rec.name || 'image'), view: rec.view });
   } catch (e) {
     toast('Could not open that image');
   }
@@ -1272,6 +1387,7 @@ $('#frameBox').addEventListener('pointerup', endFrameDrag);
 $('#frameBox').addEventListener('pointercancel', endFrameDrag);
 
 function contentBounds() {
+  if (isInf()) return objBounds(2) || { x1: 0, y1: 0, x2: 1, y2: 1 };
   let x1 = frame.ox, y1 = frame.oy, x2 = frame.ox + base.width, y2 = frame.oy + base.height;
   for (const o of objects) {
     const b = bbox(o), pad = (o.width || 0) / 2 + (o.type === 'arrow' ? 10 + o.width * 3 : 2);
@@ -1377,7 +1493,8 @@ function styleEditor() {
   const o = editing && get(editing.id);
   if (!o) return;
   const z = zoom, s = ta.style;
-  s.left = o.x * z + 'px'; s.top = o.y * z + 'px';
+  const vx = isInf() ? viewX : 0, vy = isInf() ? viewY : 0;
+  s.left = (o.x - vx) * z + 'px'; s.top = (o.y - vy) * z + 'px';
   s.font = fontOf(o, z);
   s.lineHeight = o.fontSize * 1.25 * z + 'px';
   s.padding = o.padding * z + 'px';
@@ -1433,10 +1550,7 @@ panel.addEventListener('focusout', e => {
 panel.addEventListener('mousedown', e => { if (e.target.closest('button')) e.preventDefault(); });
 
 // ---------- pointer ----------
-function pt(e) {
-  const r = cv.getBoundingClientRect();
-  return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height };
-}
+function pt(e) { return clientToWorld(e.clientX, e.clientY); }
 function newObj(type, extra) {
   const o = { id: nextId++, type, ...clone(styles[type]), ...extra };
   objects.push(o);
@@ -1455,6 +1569,7 @@ cv.addEventListener('pointerdown', e => {
   const p = pt(e);
   cv.setPointerCapture(e.pointerId);
 
+  if (isInf() && spaceDown) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); return; }
   if (cropping) {   // handles trim the crop, a drag inside slides it, a click elsewhere applies it
     const o = get(cropping.id), k = o && hitHandle(o, p);
     if (k) { drag = { mode: 'crop', k, start: p, orig: clone(o) }; return; }
@@ -1470,6 +1585,7 @@ cv.addEventListener('pointerdown', e => {
     const o = hitTest(p);
     selId = o ? o.id : null;
     if (o) drag = { mode: 'move', start: p, orig: clone(o), moved: false, label: 'Move ' + NAMES[o.type].toLowerCase() };
+    else if (isInf()) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); }
     refreshPanel(); render();
     return;
   }
@@ -1501,6 +1617,7 @@ cv.addEventListener('pointermove', e => {
   if (!base) return;
   const p = pt(e);
   if (!drag) return updateHover(p);
+  if (drag.mode === 'pan') { viewX = drag.vx - (e.clientX - drag.cx) / zoom; viewY = drag.vy - (e.clientY - drag.cy) / zoom; if (editing) styleEditor(); render(); return; }
   const o = sel();
   if (!o) return;
   const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
@@ -1555,6 +1672,7 @@ function applyHandle(o, a, k, p, shift) {
 function finishDrag() {
   if (!drag) return;
   const d = drag; drag = null;
+  if (d.mode === 'pan') { document.body.classList.remove('panning'); return; }
   const o = sel();
   if (!o) return;
   if (d.mode === 'crop' || d.mode === 'crop-pan') { refreshPanel(); render(); return; }   // one undo step when the crop is applied
@@ -1591,7 +1709,7 @@ function updateHover(p) {
     if (tool === 'select') {
       const o = hitTest(p);
       h = o ? o.id : null;
-      cursor = o ? 'move' : 'default';
+      cursor = o ? 'move' : isInf() ? 'grab' : 'default';
     } else if (tool === 'text') {
       const o = hitTest(p);
       cursor = 'text';
@@ -1739,10 +1857,12 @@ function refreshPanel() {
     title.textContent = 'Properties';
     props.append(el('p', 'hint', 'Select an annotation or image to edit it (images can be moved, resized and cropped), or pick a tool to draw. Double-click to add text.'));
     const a = el('div', 'actions');
-    const rc = el('button', 'btn', 'Resize canvas…');
-    rc.style.gridColumn = '1 / -1';
-    rc.onclick = () => setTool('canvas');
-    a.append(rc);
+    if (!isInf()) {
+      const rc = el('button', 'btn', 'Resize canvas…');
+      rc.style.gridColumn = '1 / -1';
+      rc.onclick = () => setTool('canvas');
+      a.append(rc);
+    } else props.append(el('p', 'hint', 'Infinite canvas: drag empty space, middle-drag or hold Space to pan; scroll or pinch to zoom; Fit (⌘0) shows everything. Export covers all objects.'));
     if (objects.some(x => x.type !== 'image')) {   // annotations only: the screenshot and pasted images stay
       const b = el('button', 'btn danger', 'Clear all annotations');
       b.style.gridColumn = '1 / -1';
@@ -1935,6 +2055,11 @@ $('#libClear').onclick = async () => {
 };
 $('#openBtn').onclick = $('#emptyOpen').onclick = () => $('#fileInput').click();
 $('#fileInput').onchange = e => { loadFile(e.target.files[0]); e.target.value = ''; };
+$('#emptyInfinite').onclick = () => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1;
+  openDoc(c, { name: 'Infinite canvas', label: 'Infinite canvas', frame: { w: 1, h: 1, ox: 0, oy: 0, bg: '#ffffff', infinite: true } });
+};
 $('#emptyBlank').onclick = () => {
   const c = document.createElement('canvas');
   c.width = 1600; c.height = 1000;
@@ -1962,9 +2087,9 @@ document.addEventListener('paste', e => {
   if (clip) { e.preventDefault(); pasteObject(clip); return; }
   if (text && base) {
     e.preventDefault();
-    const r = stage.getBoundingClientRect(), c = cv.getBoundingClientRect();
-    const x = clamp((r.left + r.width / 2 - c.left) / zoom, 0, frame.w - 50);
-    const y = clamp((r.top + r.height / 2 - c.top) / zoom, 0, frame.h - 50);
+    const vc = viewCenter();
+    const x = isInf() ? vc.x : clamp(vc.x, 0, frame.w - 50);
+    const y = isInf() ? vc.y : clamp(vc.y, 0, frame.h - 50);
     newObj('text', { x, y, text });
     pushHistory('Paste text');
     selectMode(); render();
@@ -1976,6 +2101,7 @@ window.addEventListener('drop', e => {
   e.preventDefault();
   document.body.classList.remove('dragging');
   const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/') || /\.(sshot|json)$/i.test(f.name));
+  if (f && isInf() && f.type.startsWith('image/')) { closeLibrary(); addImageObject(f, 'Drop image', clientToWorld(e.clientX, e.clientY)); return; }
   if (f) { closeLibrary(); loadFile(f); }
 });
 // Wheel zooms around the pointer. Trackpad pinch arrives as ctrl+wheel with small deltas;
@@ -1994,6 +2120,12 @@ stage.addEventListener('wheel', e => {
   const pinch = e.ctrlKey || e.metaKey;
   const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
   if (pinch) { zoomAt(zoom * Math.exp(-dy * 0.01), e.clientX, e.clientY); return; }
+  if (isInf()) {
+    // A mouse wheel notch (line/page units, or Chrome/Safari's wheelDelta in steps of 120) zooms;
+    // trackpad scrolling (pixel deltas, also sideways) pans.
+    const notch = e.deltaMode !== 0 || (e.wheelDeltaY && !e.deltaX && Math.abs(e.wheelDeltaY) % 120 === 0);
+    if (!notch) { const dx = e.deltaMode === 1 ? e.deltaX * 33 : e.deltaX; panBy((e.shiftKey && !dx ? dy : dx) / zoom, (e.shiftKey && !dx ? 0 : dy) / zoom); return; }
+  }
   if (Math.sign(dy) !== Math.sign(wheelAcc) || e.timeStamp - wheelT > 250) wheelAcc = 0;
   wheelT = e.timeStamp;
   wheelAcc += dy;
@@ -2016,12 +2148,13 @@ stage.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(
 stage.addEventListener('pointerdown', e => {
   if (e.button !== 1 || !base) return;
   e.preventDefault();
-  pan = { x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop };
+  pan = { x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop, vx: viewX, vy: viewY };
   stage.setPointerCapture(e.pointerId);
   document.body.classList.add('panning');
 });
 stage.addEventListener('pointermove', e => {
   if (!pan) return;
+  if (isInf()) { viewX = pan.vx - (e.clientX - pan.x) / zoom; viewY = pan.vy - (e.clientY - pan.y) / zoom; if (editing) styleEditor(); render(); return; }
   stage.scrollLeft = pan.sl - (e.clientX - pan.x);
   stage.scrollTop = pan.st - (e.clientY - pan.y);
 });
@@ -2084,9 +2217,14 @@ document.addEventListener('keydown', e => {
   }
   if (e.key === ']') { reorder(1); return; }
   if (e.key === '[') { reorder(-1); return; }
+  if (e.key === ' ' && isInf()) { e.preventDefault(); if (!spaceDown) { spaceDown = true; document.body.classList.add('spacepan'); } return; }
+  if (TOOL_KEYS[k] === 'canvas' && isInf()) return;
   if (TOOL_KEYS[k] && base) { setTool(TOOL_KEYS[k]); return; }
 });
 
+document.addEventListener('keyup', e => { if (e.key === ' ' && spaceDown) { spaceDown = false; document.body.classList.remove('spacepan'); } });
+window.addEventListener('blur', () => { spaceDown = false; document.body.classList.remove('spacepan'); });
+window.addEventListener('resize', () => { if (base && isInf()) resizeInf(); });
 // flush pending autosave when leaving
 window.addEventListener('pagehide', () => { if (saveT) { clearTimeout(saveT); saveDoc(); } });
 

@@ -1327,8 +1327,12 @@ function buildCanvasPanel(props) {
   a.style.marginBottom = '14px';
   props.append(a);
 
+  buildBgControls(props);
+}
+// Canvas background colour: swatches, a custom colour and a transparent switch (canvas tool and the no-selection panel).
+function buildBgControls(props) {
   const bgRow = el('div', 'row');
-  bgRow.append(el('label', 'lab', 'Background (new space)'));
+  bgRow.append(el('label', 'lab', 'Canvas background'));
   const sw = el('div', 'swatches');
   for (const c of BG_SWATCHES) {
     const b = el('button', 'sw' + (frame.bg && frame.bg.toLowerCase() === c ? ' on' : ''));
@@ -1574,8 +1578,7 @@ cv.addEventListener('dblclick', e => {
   if (cropping) return;
   const p = pt(e), o = hitTest(p);
   if (o && o.type === 'text') startEdit(o, false);
-  else if (o && o.type === 'image') startCrop(o);
-  else if (!o) {
+  else if (!o || o.type === 'image') {   // empty space or an image (the screenshot itself): add text there
     const st = styles.text;
     startEdit(newObj('text', { x: p.x - st.padding, y: p.y - st.fontSize * 0.625 - st.padding, text: '' }), true);
   }
@@ -1734,19 +1737,21 @@ function refreshPanel() {
   }
   if (!type) {
     title.textContent = 'Properties';
-    props.append(el('p', 'hint', 'Select an annotation to edit it, or pick a tool to draw. Double-click empty space to add text.'));
+    props.append(el('p', 'hint', 'Select an annotation or image to edit it (images can be moved, resized and cropped), or pick a tool to draw. Double-click to add text.'));
     const a = el('div', 'actions');
     const rc = el('button', 'btn', 'Resize canvas…');
     rc.style.gridColumn = '1 / -1';
     rc.onclick = () => setTool('canvas');
     a.append(rc);
-    if (objects.length) {
+    if (objects.some(x => x.type !== 'image')) {   // annotations only: the screenshot and pasted images stay
       const b = el('button', 'btn danger', 'Clear all annotations');
       b.style.gridColumn = '1 / -1';
-      b.onclick = () => { objects = []; selId = null; pushHistory('Clear all'); refreshPanel(); render(); };
+      b.onclick = () => { objects = objects.filter(x => x.type === 'image'); selId = null; pushHistory('Clear all annotations'); refreshPanel(); render(); };
       a.append(b);
     }
+    a.style.marginBottom = '14px';
     props.append(a);
+    buildBgControls(props);
     return;
   }
   const t = o || { type, ...styles[type] };
@@ -1782,7 +1787,7 @@ function refreshPanel() {
       b.title = `Original size ${k.w} × ${k.h}` + (one ? ' (already 1:1)' : '');
       b.disabled = one;
       mk('Crop', () => startCrop(o));
-      a.lastChild.title = 'Crop the image (or double-click it)';
+      a.lastChild.title = 'Crop the image';
       if (o.crop) mk('Reset crop', () => {   // whole image back, at the same scale, cropped part staying put
         const f = fullRect(o);
         Object.assign(o, { x: f.x, y: f.y, w: f.w, h: f.h });
@@ -1975,14 +1980,36 @@ window.addEventListener('drop', e => {
 });
 // Wheel zooms around the pointer. Trackpad pinch arrives as ctrl+wheel with small deltas;
 // a mouse wheel notch is ~100px (or a few lines), so it is capped to one gentle step.
+// The wheel steps the zoom by 10 points (100% -> 110% / 90%), snapped to whole tens (5 below 20%).
+// Small scroll deltas (trackpads, smooth wheels) are added up so one wheel notch is one step.
+let wheelAcc = 0, wheelT = 0;
+function wheelZoomStep(z, dir) {
+  const p = z * 100, step = p < 20 || (p <= 20.001 && dir < 0) ? 5 : 10;
+  const n = dir > 0 ? Math.floor(p / step + 1e-6) + 1 : Math.ceil(p / step - 1e-6) - 1;
+  return n * step / 100;
+}
 stage.addEventListener('wheel', e => {
   if (!base) return;
   e.preventDefault();
   const pinch = e.ctrlKey || e.metaKey;
-  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-  zoomAt(zoom * Math.exp(pinch ? -dy * 0.01 : -clamp(dy, -100, 100) * 0.0025), e.clientX, e.clientY);
+  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
+  if (pinch) { zoomAt(zoom * Math.exp(-dy * 0.01), e.clientX, e.clientY); return; }
+  if (Math.sign(dy) !== Math.sign(wheelAcc) || e.timeStamp - wheelT > 250) wheelAcc = 0;
+  wheelT = e.timeStamp;
+  wheelAcc += dy;
+  if (Math.abs(wheelAcc) < 40) return;
+  const dir = wheelAcc < 0 ? 1 : -1;
+  wheelAcc = 0;
+  zoomAt(wheelZoomStep(zoom, dir), e.clientX, e.clientY);
 }, { passive: false });
 
+// A click on the stage outside the canvas deselects (and applies a crop or text edit in progress).
+stage.addEventListener('pointerdown', e => {
+  if (e.button !== 0 || !base || tool === 'canvas' || e.target.closest('#cv, #frameBox, #editor')) return;
+  commitEdit();
+  endCrop(true);
+  if (selId != null) { selId = null; hoverId = null; refreshPanel(); render(); }
+});
 // Middle-button drag pans the stage.
 let pan = null;
 stage.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); }); // no autoscroll

@@ -6,13 +6,13 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 
 - **Paste, drop, or open**: paste with `⌘V` / `Ctrl V`, drag an image onto the window, or start from a blank canvas
 - **Images are objects**: the screenshot you paste or open, and every image you paste after it, is its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size.
-- **Crop images**: select an image and press **Crop** (or double-click it), drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
+- **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
 - **Text styling**: font, size, left / center / right alignment, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
 - **Precise values**: every slider (font size, opacity, weight…) has a box you can type a value into
-- **Canvas resize**: crop or extend the canvas with drag handles and anchor control
+- **Canvas resize and background**: crop or extend the canvas with drag handles and anchor control; pick the canvas background colour (or transparent) from the Properties panel whenever nothing is selected
 - **Copy / paste annotations**: `⌘C` copies the selected annotation with its text, color and style; `⌘V` pastes it (also across tabs)
 - **Zoom**: type an exact zoom level, jump to 1:1, or fit to window
 - **Undo / redo** with full history
@@ -55,12 +55,13 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Save `.sshot` project | `⇧⌘S` |
 | Undo / Redo | `⌘Z` / `⇧⌘Z` |
 | Zoom in / out | `⌘+` / `⌘−` |
-| Zoom at pointer | Mouse wheel or trackpad pinch |
+| Zoom at pointer | Mouse wheel (10% steps) or trackpad pinch |
 | Pan | Middle-click and drag |
 | Actual size (100%) | `⌘1` |
 | Fit to window | `⌘0` |
 | Set exact zoom | Click the zoom %, type a value, `Enter` |
 | Delete selection | `Delete` / `Backspace` |
+| Deselect | `Esc`, or click outside the canvas |
 | Send backward / bring forward | `[` / `]` |
 | Nudge selection (×10 with `⇧`) | Arrow keys |
 | Constrain angle / proportions | Hold `⇧` while drawing |

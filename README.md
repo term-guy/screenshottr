@@ -9,7 +9,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Images are objects**: the screenshot you paste or open, and every image you paste after it, is its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size.
 - **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
-- **Pen and highlighter**: draw freehand strokes; the tool stays on so you can keep drawing, and `⇧` draws a straight segment. The highlighter blends with what's below, so text under it stays readable
+- **Pen and highlighter**: draw freehand strokes; the tool stays on so you can keep drawing, and `⇧` draws a straight segment. The highlighter blends with what's below so text under it stays readable, on light and dark backgrounds alike (it picks the blend from where the stroke starts; switch it under **Background** in the panel)
 - **Snap guides**: while moving, objects snap their edges and centres to other objects and to the canvas, with a guide line; hold `⌥` / `Alt` to move freely
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time

@@ -383,7 +383,7 @@ const PROPS = {
   text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
   step:    ['n', 'color', 'textColor', 'size', 'opacity'],
   pen:     ['color', 'width', 'opacity'],
-  marker:  ['color', 'width', 'opacity'],
+  marker:  ['color', 'width', 'opacity', 'blend'],
   redact:  ['mode', 'strength'],
   image:   ['opacity'],
 };
@@ -411,6 +411,7 @@ const CTRL = {
   textColor: { label: 'Number color', kind: 'color' },
   size:      { label: 'Size', kind: 'range', min: 16, max: 160, step: 1 },
   mode:      { label: 'Mode', kind: 'seg', options: [['pixelate', 'Pixelate'], ['blur', 'Blur'], ['solid', 'Solid']] },
+  blend:     { label: 'Background', kind: 'seg', noStyle: true, def: 'multiply', options: [['multiply', 'Light'], ['screen', 'Dark']] },
   strength:  { label: 'Strength', kind: 'range', min: 2, max: 48, step: 1, showIf: o => o.mode !== 'solid' },
 };
 
@@ -848,12 +849,13 @@ function drawRedact(c, o) {
   c.imageSmoothingEnabled = true;
 }
 // A freehand stroke, smoothed with quadratic curves through the midpoints of its points.
-// The highlighter multiplies onto what is below, so text under it stays readable.
+// The highlighter blends with what is below so text under it stays readable: multiply on light
+// backgrounds (dark text stays dark), screen on dark ones (light text stays light).
 function drawStroke(c, o) {
   const q = o.pts;
   c.strokeStyle = c.fillStyle = o.color;
   c.lineWidth = o.width; c.lineCap = 'round'; c.lineJoin = 'round';
-  if (o.type === 'marker') c.globalCompositeOperation = 'multiply';
+  if (o.type === 'marker') c.globalCompositeOperation = o.blend === 'screen' ? 'screen' : 'multiply';
   if (q.length <= 4) {   // a dot or a single segment
     c.beginPath(); c.moveTo(q[0], q[1]); c.lineTo(q[q.length - 2] + .01, q[q.length - 1]); c.stroke();
     return;
@@ -1723,7 +1725,8 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (tool === 'pen' || tool === 'marker') {   // the tool stays on, so you can keep drawing
-    const o = newObj(tool, { pts: [p.x, p.y] });
+    const o = newObj(tool, { pts: [p.x, p.y], ...(tool === 'marker' && { blend: darkUnder(e) ? 'screen' : 'multiply' }) });
+    setSel(null);   // no selection box while drawing
     drag = { mode: 'draw', id: o.id, start: p, last: p };
     render();
     return;
@@ -1734,6 +1737,20 @@ cv.addEventListener('pointerdown', e => {
   drag = { mode: 'create', start: p, id: o.id };
   refreshPanel(); render();
 });
+// Whether the canvas around a pointer event is mostly dark (median luminance of the pixels nearby).
+function darkUnder(e) {
+  try {
+    const r = cv.getBoundingClientRect(), sx = cv.width / r.width, sy = cv.height / r.height, R = Math.round(8 * sx);
+    const x = Math.round((e.clientX - r.left) * sx) - R, y = Math.round((e.clientY - r.top) * sy) - R;
+    const d = ctx.getImageData(Math.max(0, x), Math.max(0, y), R * 2, R * 2).data, lum = [];
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3] / 255;   // transparent parts show the light checkerboard
+      lum.push((0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255 * a + (1 - a));
+    }
+    lum.sort((a, b) => a - b);
+    return lum[lum.length >> 1] < 0.45;
+  } catch (err) { return false; }
+}
 // Drag the selected objects together; `moved` is true when the drag should count even without moving.
 function startMove(p, moved, label) {
   const objs = selObjs();
@@ -1924,7 +1941,7 @@ function updateHover(p) {
       const o = hitTest(p);
       cursor = 'text';
       if (o && o.type === 'text') h = o.id;
-    } else cursor = 'crosshair';
+    } else cursor = tool === 'marker' ? 'text' : 'crosshair';   // the highlighter marks text, so an I-beam
   }
   cv.style.cursor = cursor;
   if (h !== hoverId) { hoverId = h; render(); }
@@ -2326,7 +2343,7 @@ function setTool(t) {
   tool = t;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
   if (t !== 'select' && selObjs().some(o => o.type !== t)) setSel(null);
-  cv.style.cursor = t === 'select' || t === 'canvas' ? 'default' : t === 'text' ? 'text' : 'crosshair';
+  cv.style.cursor = t === 'select' || t === 'canvas' ? 'default' : t === 'text' || t === 'marker' ? 'text' : 'crosshair';
   resetFrameRect();
   updateFrameBox();
   refreshPanel(); render();

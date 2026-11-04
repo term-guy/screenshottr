@@ -390,7 +390,7 @@ let docId = null, docName = '';
 let fr = null;           // proposed canvas rect while the canvas tool is active
 let anchor = [0.5, 0.5];
 let objects = [];
-let selId = null, hoverId = null;
+let selIds = [], hoverId = null;   // selected object ids, in the order they were selected
 let tool = 'select';
 let zoom = 1;
 let nextId = 1;
@@ -468,7 +468,14 @@ function saveStyles() {
 }
 
 const get = id => objects.find(o => o.id === id);
-const sel = () => (selId == null ? null : get(selId));
+// The selected object when exactly one is selected (handles, properties, cropping, text editing).
+const sel = () => (selIds.length === 1 ? get(selIds[0]) : null);
+const selObjs = () => objects.filter(o => selIds.includes(o.id));   // in stacking order
+const isSel = id => selIds.includes(id);
+// "Text" for one object, "3 objects" for several.
+const selLabel = objs => objs.length === 1 ? NAMES[objs[0].type].toLowerCase() : objs.length + ' objects';
+function setSel(ids) { selIds = ids == null ? [] : Array.isArray(ids) ? ids : [ids]; }
+function toggleSel(id) { setSel(isSel(id) ? selIds.filter(x => x !== id) : [...selIds, id]); }
 const clone = o => JSON.parse(JSON.stringify(o));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -734,7 +741,7 @@ function startCrop(o) {
   if (cropping) endCrop(true);
   Object.assign(o, norm(o));
   cropping = { id: o.id, before: clone(o) };
-  selId = o.id;
+  setSel(o.id);
   selectMode(); render();
 }
 // Leave crop editing: apply (one undo step) or put the image back as it was.
@@ -833,12 +840,24 @@ function drawObj(c, o) {
 }
 function drawOverlay(c) {
   const lw = 1.5 / zoom, hs = HANDLE / zoom;
-  const hov = hoverId != null && hoverId !== selId ? get(hoverId) : null;
+  const hov = hoverId != null && !isSel(hoverId) ? get(hoverId) : null;
   if (hov) {
     c.save(); c.strokeStyle = ACCENT; c.globalAlpha = .6; c.lineWidth = lw;
     const b = bbox(hov), p = 4 / zoom;
     c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
     c.restore();
+  }
+  if (drag && drag.mode === 'marquee' && drag.moved) {   // Shift-drag selection box
+    const r = rectOf(drag.start, drag.end);
+    c.save(); c.fillStyle = ACCENT; c.globalAlpha = .1; c.fillRect(r.x, r.y, r.w, r.h);
+    c.globalAlpha = 1; c.strokeStyle = ACCENT; c.lineWidth = lw; c.strokeRect(r.x, r.y, r.w, r.h);
+    c.restore();
+  }
+  if (selIds.length > 1) {   // several selected: a dashed box around each, no handles
+    c.save(); c.strokeStyle = ACCENT; c.lineWidth = lw; c.setLineDash([4 / zoom, 3 / zoom]);
+    for (const x of selObjs()) { const b = bbox(x), p = 3 / zoom; c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2); }
+    c.restore();
+    return;
   }
   const o = sel();
   if (!o || (editing && editing.id === o.id)) return;
@@ -916,7 +935,7 @@ function gotoHistory(i) {
   applyMode();
   rebuildPage();
   if (imageChanged) fit();
-  if (!sel()) selId = null;
+  setSel(selIds.filter(id => get(id)));
   hoverId = null;
   resetFrameRect();
   refreshPanel(); renderHistory(); render();
@@ -966,7 +985,7 @@ function openDoc(img, { frame: f, objects: objs = [], id, name, label, view }) {
   for (const o of objects) nextId = Math.max(nextId, o.id + 1);
   docId = id || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   docName = name || 'Untitled';
-  selId = null; hoverId = null;
+  setSel(null); hoverId = null;
   $('#empty').style.display = 'none';
   $('#box').style.display = 'block';
   for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zoomLabel', '#zoom1', '#zoomFit']) $(b).disabled = false;
@@ -1483,7 +1502,7 @@ function toast(msg) {
 // ---------- text editing ----------
 function startEdit(o, isNew) {
   editing = { id: o.id, isNew };
-  selId = o.id;
+  setSel(o.id);
   ta.value = o.text || '';
   ta.style.display = 'block';
   styleEditor();
@@ -1529,7 +1548,7 @@ function commitEdit() {
     o.text = ta.value.replace(/\s+$/, '');
     if (!o.text.trim()) {
       objects = objects.filter(x => x !== o);
-      if (selId === id) selId = null;
+      setSel(selIds.filter(x => x !== id));
       if (!isNew) pushHistory('Delete text');
     } else {
       pushHistory(isNew ? 'Add text' : 'Edit text');
@@ -1556,7 +1575,7 @@ function pt(e) { return clientToWorld(e.clientX, e.clientY); }
 function newObj(type, extra) {
   const o = { id: nextId++, type, ...clone(styles[type]), ...extra };
   objects.push(o);
-  selId = o.id;
+  setSel(o.id);
   return o;
 }
 cv.addEventListener('mousedown', e => e.preventDefault()); // don't steal focus from the text editor
@@ -1585,16 +1604,20 @@ cv.addEventListener('pointerdown', e => {
   }
   if (tool === 'select') {
     const o = hitTest(p);
-    selId = o ? o.id : null;
-    if (o) drag = { mode: 'move', start: p, orig: clone(o), moved: false, label: 'Move ' + NAMES[o.type].toLowerCase() };
-    else if (isInf()) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); }
+    // Shift: click toggles an object in the selection, drag draws a box that adds what it encloses
+    if (e.shiftKey) { drag = { mode: 'marquee', start: p, end: p, hit: o, moved: false }; return; }
+    const collapse = o && isSel(o.id) && selIds.length > 1 ? o.id : null;   // a click without dragging selects just it
+    if (o && !isSel(o.id)) setSel(o.id);   // clicking one of several selected objects keeps them all, to move together
+    if (o) { startMove(p, false); drag.collapse = collapse; }
+    else if (selIds.length) setSel(null);
+    if (!o && isInf()) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); }
     refreshPanel(); render();
     return;
   }
   if (tool === 'text') {
     const o = hitTest(p);
     if (o && o.type === 'text') { startEdit(o, false); selectMode(); return; }
-    if (wasEditing) { selId = null; refreshPanel(); render(); return; }
+    if (wasEditing) { setSel(null); refreshPanel(); render(); return; }
     const st = styles.text;
     const t = newObj('text', { x: p.x - st.padding, y: p.y - st.fontSize * 0.625 - st.padding, text: '' });
     startEdit(t, true);
@@ -1603,8 +1626,8 @@ cv.addEventListener('pointerdown', e => {
   }
   if (tool === 'step') {
     const n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
-    const o = newObj('step', { x: p.x, y: p.y, n });
-    drag = { mode: 'move', start: p, orig: clone(o), moved: true, label: 'Add step ' + n };
+    newObj('step', { x: p.x, y: p.y, n });
+    startMove(p, true, 'Add step ' + n);
     selectMode();
     render();
     return;
@@ -1615,21 +1638,37 @@ cv.addEventListener('pointerdown', e => {
   drag = { mode: 'create', start: p, id: o.id };
   refreshPanel(); render();
 });
+// Drag the selected objects together; `moved` is true when the drag should count even without moving.
+function startMove(p, moved, label) {
+  const objs = selObjs();
+  drag = { mode: 'move', start: p, origs: objs.map(clone), moved,
+    label: label || 'Move ' + selLabel(objs) };
+}
+function rectOf(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; }
+function shiftObj(o, a, dx, dy) {
+  if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
+  else { o.x = a.x + dx; o.y = a.y + dy; }
+}
 cv.addEventListener('pointermove', e => {
   if (!base) return;
   const p = pt(e);
   if (!drag) return updateHover(p);
   if (drag.mode === 'pan') { viewX = drag.vx - (e.clientX - drag.cx) / zoom; viewY = drag.vy - (e.clientY - drag.cy) / zoom; if (editing) styleEditor(); render(); return; }
-  const o = sel();
-  if (!o) return;
   const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+  if (drag.mode === 'marquee') {
+    if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
+    drag.moved = true; drag.end = p;
+    render(); return;
+  }
   if (drag.mode === 'move') {
     if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
     drag.moved = true;
-    const a = drag.orig;
-    if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
-    else { o.x = a.x + dx; o.y = a.y + dy; }
-  } else if (drag.mode === 'create') {
+    for (const a of drag.origs) { const o = get(a.id); if (o) shiftObj(o, a, dx, dy); }
+    render(); return;
+  }
+  const o = sel();
+  if (!o) return;
+  if (drag.mode === 'create') {
     if ('x1' in o) {
       const q = e.shiftKey ? snapAngle(o.x1, o.y1, p.x, p.y) : p;
       o.x2 = q.x; o.y2 = q.y;
@@ -1675,16 +1714,27 @@ function finishDrag() {
   if (!drag) return;
   const d = drag; drag = null;
   if (d.mode === 'pan') { document.body.classList.remove('panning'); return; }
+  if (d.mode === 'marquee') {
+    if (d.moved) {
+      const r = rectOf(d.start, d.end);
+      const inside = objects.filter(o => { const b = bbox(o); return b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h; });
+      setSel([...selIds, ...inside.map(o => o.id).filter(id => !isSel(id))]);
+    } else if (d.hit) toggleSel(d.hit.id);
+    refreshPanel(); render(); return;
+  }
+  if (d.mode === 'move') {
+    if (d.moved) pushHistory(d.label);
+    else if (d.collapse != null) setSel(d.collapse);
+    refreshPanel(); render(); return;
+  }
   const o = sel();
   if (!o) return;
   if (d.mode === 'crop' || d.mode === 'crop-pan') { refreshPanel(); render(); return; }   // one undo step when the crop is applied
   if (o.w !== undefined && o.type !== 'text' && o.type !== 'step') Object.assign(o, norm(o));
   if (d.mode === 'create') {
     const tiny = 'x1' in o ? Math.hypot(o.x2 - o.x1, o.y2 - o.y1) * zoom < 4 : (o.w * zoom < 4 || o.h * zoom < 4);
-    if (tiny) { objects = objects.filter(x => x !== o); selId = null; }
+    if (tiny) { objects = objects.filter(x => x !== o); setSel(null); }
     else { pushHistory('Add ' + NAMES[o.type].toLowerCase()); selectMode(); }
-  } else if (d.mode === 'move') {
-    if (d.moved) pushHistory(d.label);
   } else {
     pushHistory((o.type === 'text' ? 'Resize ' : 'Reshape ') + NAMES[o.type].toLowerCase());
   }
@@ -1844,6 +1894,21 @@ function refreshPanel() {
   props.innerHTML = '';
   const o = sel();
   const type = o ? o.type : (tool !== 'select' ? tool : null);
+  if (base && selIds.length > 1 && tool !== 'canvas') {
+    const objs = selObjs();
+    title.innerHTML = '';
+    title.append(objs.length + ' objects', el('span', 'muted', 'selected'));
+    props.append(el('p', 'hint', 'Drag any of them to move them together. Shift-click adds or removes an object, Shift-drag adds everything inside the box.'));
+    const a = el('div', 'actions');
+    const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
+    mk('Copy', () => copyObjects(selObjs()));
+    mk('Duplicate', duplicate);
+    mk('Bring to front', () => reorder(1));
+    mk('Send to back', () => reorder(-1));
+    mk('Delete', del, 'danger');
+    props.append(a);
+    return;
+  }
   if (!base) {
     title.textContent = 'Properties';
     props.append(el('p', 'hint', 'Paste or open a screenshot to start annotating.'));
@@ -1868,7 +1933,7 @@ function refreshPanel() {
     if (objects.some(x => x.type !== 'image')) {   // annotations only: the screenshot and pasted images stay
       const b = el('button', 'btn danger', 'Clear all annotations');
       b.style.gridColumn = '1 / -1';
-      b.onclick = () => { objects = objects.filter(x => x.type === 'image'); selId = null; pushHistory('Clear all annotations'); refreshPanel(); render(); };
+      b.onclick = () => { objects = objects.filter(x => x.type === 'image'); setSel(null); pushHistory('Clear all annotations'); refreshPanel(); render(); };
       a.append(b);
     }
     a.style.marginBottom = '14px';
@@ -1933,30 +1998,38 @@ function refreshPanel() {
 
 // ---------- object actions ----------
 function del() {
-  const o = sel();
-  if (!o) return;
   commitEdit();
-  if (!get(o.id)) return;
-  objects = objects.filter(x => x !== o);
-  selId = null;
-  pushHistory('Delete ' + NAMES[o.type].toLowerCase());
+  const objs = selObjs();
+  if (!objs.length) return;
+  objects = objects.filter(x => !objs.includes(x));
+  setSel(null);
+  pushHistory('Delete ' + selLabel(objs));
   refreshPanel(); render();
 }
-// Add a copy of `src` (from this or another document) shifted by `off`, and select it.
-function insertCopy(src, off, label, offY = off) {
-  const c = clone(src);
-  c.id = nextId++;
-  if (c.type === 'step') c.n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
-  if ('x1' in c) { c.x1 += off; c.y1 += offY; c.x2 += off; c.y2 += offY; } else { c.x += off; c.y += offY; }
-  objects.push(c); selId = c.id;
-  pushHistory(label + ' ' + NAMES[c.type].toLowerCase());
+// Add copies of `srcs` (from this or another document) shifted by (dx, dy) on top, as one undo
+// step, and select them. Copied steps are renumbered after the existing ones, in order.
+function insertCopies(srcs, dx, dy, label) {
+  const ids = [];
+  for (const src of srcs) {
+    const c = clone(src);
+    c.id = nextId++;
+    if (c.type === 'step') c.n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
+    shiftObj(c, c, dx, dy);
+    objects.push(c); ids.push(c.id);
+  }
+  setSel(ids);
+  pushHistory(label + ' ' + selLabel(srcs));
   selectMode(); render();
 }
 function duplicate() {
-  const o = sel();
-  if (!o) return;
   commitEdit();
-  insertCopy(o, 20, 'Duplicate');
+  const objs = selObjs();
+  if (objs.length) insertCopies(objs, 20, 20, 'Duplicate');
+}
+function selectAll() {
+  commitEdit(); endCrop(true);
+  setSel(objects.map(o => o.id));
+  selectMode(); render();
 }
 
 // ---------- copy / paste objects ----------
@@ -2003,9 +2076,9 @@ function clipPayload(objs, urls) {
   const plain = objs.every(o => o.type === 'text') ? objs.map(o => o.text).join('\n') : json;
   return { html, plain, data };
 }
-async function copyObject(o) {
+async function copyObjects(sel) {
   commitEdit();
-  const objs = [clone(o)];
+  const objs = sel.map(clone);
   const keys = [...new Set(objs.filter(x => x.type === 'image').map(x => x.src))];
   const urls = {};
   const ready = keys.every(k => assetURLs.has(k));
@@ -2024,7 +2097,7 @@ async function copyObject(o) {
     } catch (e) { console.error(e); toast('Could not copy'); return; }
   }
   objClip = { objs, assets: urls, from: INSTANCE, pastes: 0, sig: JSON.stringify(objs) };
-  toast('Copied ' + NAMES[o.type].toLowerCase());
+  toast('Copied ' + selLabel(objs));
 }
 document.addEventListener('copy', e => {
   if (!pendingCopy) return;
@@ -2071,21 +2144,21 @@ async function pasteObjects(clip) {
     dx = Math.round(vc.x - (b.x1 + b.x2) / 2) + 20 * (clip.pastes - 1);
     dy = Math.round(vc.y - (b.y1 + b.y2) / 2) + 20 * (clip.pastes - 1);
   }
-  for (const o of objs) insertCopy(o, dx, 'Paste', dy);
+  insertCopies(objs, dx, dy, 'Paste');
 }
-function reorder(dir) {
-  const o = sel();
-  if (!o) return;
-  objects = objects.filter(x => x !== o);
-  dir > 0 ? objects.push(o) : objects.unshift(o);
+function reorder(dir) {   // the selection keeps its own stacking order
+  const objs = selObjs();
+  if (!objs.length) return;
+  const rest = objects.filter(x => !objs.includes(x));
+  objects = dir > 0 ? [...rest, ...objs] : [...objs, ...rest];
   pushHistory(dir > 0 ? 'Bring to front' : 'Send to back');
   render();
 }
 function nudge(dx, dy) {
-  const o = sel();
-  if (!o) return;
-  if ('x1' in o) { o.x1 += dx; o.y1 += dy; o.x2 += dx; o.y2 += dy; } else { o.x += dx; o.y += dy; }
-  pushHistory('Nudge ' + NAMES[o.type].toLowerCase(), 'nudge:' + o.id);
+  const objs = selObjs();
+  if (!objs.length) return;
+  for (const o of objs) shiftObj(o, o, dx, dy);
+  pushHistory('Nudge ' + selLabel(objs), 'nudge:' + selIds.join(','));
   render();
 }
 function setTool(t) {
@@ -2093,8 +2166,7 @@ function setTool(t) {
   endCrop(true);
   tool = t;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
-  const s = sel();
-  if (s && t !== 'select' && s.type !== t) selId = null;
+  if (t !== 'select' && selObjs().some(o => o.type !== t)) setSel(null);
   cv.style.cursor = t === 'select' || t === 'canvas' ? 'default' : t === 'text' ? 'text' : 'crosshair';
   resetFrameRect();
   updateFrameBox();
@@ -2230,7 +2302,7 @@ stage.addEventListener('pointerdown', e => {
   if (e.button !== 0 || !base || tool === 'canvas' || e.target.closest('#cv, #frameBox, #editor')) return;
   commitEdit();
   endCrop(true);
-  if (selId != null) { selId = null; hoverId = null; refreshPanel(); render(); }
+  if (selIds.length) { setSel(null); hoverId = null; refreshPanel(); render(); }
 });
 // Middle-button drag pans the stage.
 let pan = null;
@@ -2275,11 +2347,11 @@ document.addEventListener('keydown', e => {
   if (mod && k === 'c') {
     if (String(window.getSelection())) return;
     e.preventDefault();
-    const o = sel();
-    o ? copyObject(o) : copyImage();
+    selIds.length ? copyObjects(selObjs()) : copyImage();
     return;
   }
   if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+  if (mod && k === 'a' && base) { e.preventDefault(); selectAll(); return; }
   if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); return; }
   if (mod && k === '-') { e.preventDefault(); zoomStep(-1); return; }
   if (mod && k === '0') { e.preventDefault(); fit(); return; }
@@ -2294,12 +2366,12 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); del(); return; }
   if (e.key === 'Escape') {
     if (drag) return;
-    if (selId != null) { selId = null; refreshPanel(); render(); } else setTool('select');
+    if (selIds.length) { setSel(null); refreshPanel(); render(); } else setTool('select');
     return;
   }
   if (e.key === 'Enter') { const o = sel(); if (o && o.type === 'text') { e.preventDefault(); startEdit(o, false); } return; }
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-  if (arrows[e.key] && sel()) {
+  if (arrows[e.key] && selIds.length) {
     e.preventDefault();
     const m = e.shiftKey ? 10 : 1;
     nudge(arrows[e.key][0] * m, arrows[e.key][1] * m);

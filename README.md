@@ -11,10 +11,11 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
+- **Multiple selection**: `⇧`-click to add or remove objects, `⇧`-drag a box to add everything inside it, or `⌘A` for all. Drag any selected object to move them together; nudge, duplicate, reorder, delete, and copy work on the whole selection
 - **Text styling**: font, size, left / center / right alignment, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
 - **Precise values**: every slider (font size, opacity, weight…) has a box you can type a value into
 - **Canvas resize and background**: crop or extend the canvas with drag handles and anchor control; pick the canvas background colour (or transparent) from the Properties panel whenever nothing is selected
-- **Copy / paste objects between instances**: `⌘C` copies the selected object (annotation, text with its style, or image with its pixels, crop and size); `⌘V` pastes it in any Screenshottr tab, window or browser, centred in the view. Other apps get the plain text or the image
+- **Copy / paste objects between instances**: `⌘C` copies the selected objects (annotations, text with its style, images with their pixels, crop and size); `⌘V` pastes it in any Screenshottr tab, window or browser, centred in the view. Other apps get the plain text or the image
 - **Zoom**: type an exact zoom level, jump to 1:1, or fit to window
 - **Undo / redo** with full history
 - **Export**: copy to clipboard, save as PNG, or save an editable `.sshot` project file
@@ -48,7 +49,10 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Redact | `P` |
 | Resize canvas | `C` |
 | Open image or project | `⌘O` |
-| Copy selected object | `⌘C` |
+| Copy selected objects | `⌘C` |
+| Add / remove object from selection | `⇧`-click |
+| Add objects inside a box to selection | `⇧`-drag |
+| Select all | `⌘A` |
 | Paste annotation, or an image as a new object | `⌘V` |
 | Paste an image as a new document | `⇧⌘V` |
 | Copy image to clipboard (nothing selected) | `⌘C` |

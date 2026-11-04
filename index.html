@@ -257,6 +257,8 @@
   <button class="tb tool" data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
   <button class="tb tool" data-tool="ellipse" title="Ellipse (E)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button>
   <button class="tb tool" data-tool="text" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M5 7V5h14v2M12 5v14M9 19h6"/></svg></button>
+  <button class="tb tool" data-tool="pen" title="Pen: draw freehand (D)"><svg viewBox="0 0 24 24"><path d="M4 20c2-1 3-4 5-4s2 3 4 3 3-6 7-12"/></svg></button>
+  <button class="tb tool" data-tool="marker" title="Highlighter (H)"><svg viewBox="0 0 24 24"><path d="M14.5 4.5l5 5L11 18H6v-5z"/><path d="M4 21h16" stroke-width="3" opacity=".55"/></svg></button>
   <button class="tb tool" data-tool="step" title="Numbered step (N)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10.5 9.5L12.5 8v8"/></svg></button>
   <button class="tb tool" data-tool="redact" title="Redact: pixelate / blur / solid (P)"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/><path d="M4 4h8v8H4zM12 12h8v8h-8z" fill="currentColor" stroke="none" opacity=".45"/></svg></button>
   <button class="tb tool" data-tool="canvas" title="Resize canvas (C)"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/></svg></button>
@@ -355,7 +357,7 @@ const FONTS = {
   hand: '"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive',
 };
 const SWATCHES = ['#ff3b30', '#ff9f0a', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#1c1c1e'];
-const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
+const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', pen: 'Pen', marker: 'Highlight', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
 const BG_SWATCHES = ['#ffffff', '#f2f2f7', '#d1d1d6', '#1c1c1e', '#000000', '#0a84ff', '#ff3b30', '#ffd60a'];
 const ACCENT = '#4c8dff';
 const HANDLE = 9;
@@ -368,6 +370,8 @@ const DEFAULTS = {
   text:    { color: '#ffffff', fontSize: 28, fontFamily: 'system', bold: true, italic: false, underline: false, strike: false,
              align: 'left', outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
   step:    { color: '#ff3b30', textColor: '#ffffff', size: 40, opacity: 1 },
+  pen:     { color: '#ff3b30', width: 4, opacity: 1 },
+  marker:  { color: '#ffd60a', width: 22, opacity: 0.5 },
   redact:  { mode: 'pixelate', strength: 12 },
   image:   { opacity: 1 },
 };
@@ -378,6 +382,8 @@ const PROPS = {
   ellipse: ['color', 'width', 'dash', 'fillOn', 'fill', 'opacity'],
   text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
   step:    ['n', 'color', 'textColor', 'size', 'opacity'],
+  pen:     ['color', 'width', 'opacity'],
+  marker:  ['color', 'width', 'opacity'],
   redact:  ['mode', 'strength'],
   image:   ['opacity'],
 };
@@ -385,7 +391,7 @@ const alignIcon = a => `<svg viewBox="0 0 22 14"><path d="M3 2h16M${[3, 6, 9][a]
 const headIcon = (l, r) => `<svg viewBox="0 0 22 14"><path d="M3 7h16"/>${l ? '<path d="M7 3L3 7l4 4"/>' : ''}${r ? '<path d="M15 3l4 4-4 4"/>' : ''}</svg>`;
 const CTRL = {
   color:     { label: 'Color', kind: 'color' },
-  width:     { label: 'Weight', kind: 'range', min: 1, max: 40, step: 1, minFor: { rect: 0, ellipse: 0 } },
+  width:     { label: 'Weight', kind: 'range', min: 1, max: 40, step: 1, minFor: { rect: 0, ellipse: 0 }, maxFor: { marker: 80 } },
   heads:     { label: 'Arrowheads', kind: 'seg', options: [['none', headIcon(0, 0)], ['start', headIcon(1, 0)], ['end', headIcon(0, 1)], ['both', headIcon(1, 1)]] },
   headStyle: { label: 'Head style', kind: 'seg', options: [['filled', 'Filled'], ['open', 'Open']] },
   dash:      { label: 'Line style', kind: 'seg', options: [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] },
@@ -550,6 +556,13 @@ function bbox(o) {
       return { x: Math.min(o.x1, o.x2), y: Math.min(o.y1, o.y2), w: Math.abs(o.x2 - o.x1), h: Math.abs(o.y2 - o.y1) };
     case 'text': { const L = textLayout(o); return { x: o.x, y: o.y, w: L.w, h: L.h }; }
     case 'step': { const r = o.size / 2; return { x: o.x - r, y: o.y - r, w: o.size, h: o.size }; }
+    case 'pen': case 'marker': {   // pts: [x0, y0, x1, y1, ...]
+      let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+      for (let i = 0; i < o.pts.length; i += 2) {
+        x1 = Math.min(x1, o.pts[i]); x2 = Math.max(x2, o.pts[i]); y1 = Math.min(y1, o.pts[i + 1]); y2 = Math.max(y2, o.pts[i + 1]);
+      }
+      return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+    }
     default: return norm(o);
   }
 }
@@ -578,6 +591,13 @@ function hitObj(o, p) {
       return o.fillOn ? d <= 1 + band : Math.abs(d - 1) <= band;
     }
     case 'step': return Math.hypot(p.x - o.x, p.y - o.y) <= o.size / 2 + tol / 2;
+    case 'pen': case 'marker': {
+      const r = o.width / 2 + tol, q = o.pts;
+      if (!inBox(p, bbox(o), r)) return false;
+      if (q.length === 2) return Math.hypot(p.x - q[0], p.y - q[1]) <= r;
+      for (let i = 2; i < q.length; i += 2) if (distSeg(p, q[i - 2], q[i - 1], q[i], q[i + 1]) <= r) return true;
+      return false;
+    }
     default: return inBox(p, bbox(o), tol / 2);
   }
 }
@@ -591,7 +611,7 @@ function hitTest(p) {
 }
 function handles(o) {
   if (o.type === 'arrow' || o.type === 'line') return [{ k: 'p1', x: o.x1, y: o.y1 }, { k: 'p2', x: o.x2, y: o.y2 }];
-  if (o.type === 'step') return [];
+  if (o.type === 'step' || o.type === 'pen' || o.type === 'marker') return [];
   const b = bbox(o);
   if (o.type === 'text') return [{ k: 'se', x: b.x + b.w, y: b.y + b.h }];
   const { x, y, w, h } = b;
@@ -827,11 +847,28 @@ function drawRedact(c, o) {
   c.drawImage(redactTmp, 0, 0, sw, sh, x + ox, y + oy, w, h);
   c.imageSmoothingEnabled = true;
 }
+// A freehand stroke, smoothed with quadratic curves through the midpoints of its points.
+// The highlighter multiplies onto what is below, so text under it stays readable.
+function drawStroke(c, o) {
+  const q = o.pts;
+  c.strokeStyle = c.fillStyle = o.color;
+  c.lineWidth = o.width; c.lineCap = 'round'; c.lineJoin = 'round';
+  if (o.type === 'marker') c.globalCompositeOperation = 'multiply';
+  if (q.length <= 4) {   // a dot or a single segment
+    c.beginPath(); c.moveTo(q[0], q[1]); c.lineTo(q[q.length - 2] + .01, q[q.length - 1]); c.stroke();
+    return;
+  }
+  c.beginPath(); c.moveTo(q[0], q[1]);
+  for (let i = 2; i < q.length - 2; i += 2) c.quadraticCurveTo(q[i], q[i + 1], (q[i] + q[i + 2]) / 2, (q[i + 1] + q[i + 3]) / 2);
+  c.lineTo(q[q.length - 2], q[q.length - 1]);
+  c.stroke();
+}
 function drawObj(c, o) {
   c.save();
   c.globalAlpha = o.opacity ?? 1;
   switch (o.type) {
     case 'arrow': case 'line': drawLine(c, o); break;
+    case 'pen': case 'marker': drawStroke(c, o); break;
     case 'rect': {
       const b = norm(o);
       roundRectPath(c, b.x, b.y, b.w, b.h, o.radius);
@@ -873,6 +910,14 @@ function drawOverlay(c) {
     const b = bbox(hov), p = 4 / zoom;
     c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
     c.restore();
+  }
+  if (drag && drag.guides && drag.guides.length) {   // snap guides
+    c.save(); c.strokeStyle = '#ff2d95'; c.lineWidth = 1 / zoom;
+    c.beginPath();
+    for (const g of drag.guides) {
+      if ('x' in g) { c.moveTo(g.x, -1e6); c.lineTo(g.x, 1e6); } else { c.moveTo(-1e6, g.y); c.lineTo(1e6, g.y); }
+    }
+    c.stroke(); c.restore();
   }
   if (drag && drag.mode === 'marquee' && drag.moved) {   // Shift-drag selection box
     const r = rectOf(drag.start, drag.end);
@@ -1414,7 +1459,7 @@ function applyFrame(r, label) {
   if (w === frame.w && h === frame.h && !dx && !dy) return resetFrameRect(), updateFrameBox();
   if (w < 1 || h < 1 || w > 16384 || h > 16384) return toast('Canvas size must be between 1 and 16384 px');
   for (const o of objects) {
-    if ('x1' in o) { o.x1 -= dx; o.y1 -= dy; o.x2 -= dx; o.y2 -= dy; } else { o.x -= dx; o.y -= dy; }
+    shiftObj(o, o, -dx, -dy);
   }
   frame = { ...frame, w, h, ox: frame.ox - dx, oy: frame.oy - dy };
   rebuildPage();
@@ -1677,6 +1722,12 @@ cv.addEventListener('pointerdown', e => {
     render();
     return;
   }
+  if (tool === 'pen' || tool === 'marker') {   // the tool stays on, so you can keep drawing
+    const o = newObj(tool, { pts: [p.x, p.y] });
+    drag = { mode: 'draw', id: o.id, start: p, last: p };
+    render();
+    return;
+  }
   const o = (tool === 'arrow' || tool === 'line')
     ? newObj(tool, { x1: p.x, y1: p.y, x2: p.x, y2: p.y })
     : newObj(tool, { x: p.x, y: p.y, w: 0, h: 0 });
@@ -1687,11 +1738,52 @@ cv.addEventListener('pointerdown', e => {
 function startMove(p, moved, label) {
   const objs = selObjs();
   drag = { mode: 'move', start: p, origs: objs.map(clone), moved,
-    label: label || 'Move ' + selLabel(objs) };
+    label: label || 'Move ' + selLabel(objs), snap: snapTargets(objs) };
+}
+// ---------- snapping ----------
+// While moving, the selection's left / centre / right and top / middle / bottom snap to the same
+// lines of the other objects and of the canvas, within a few screen pixels. Alt turns it off.
+const SNAP_PX = 6;
+const linesOf = b => ({ xs: [b.x, b.x + b.w / 2, b.x + b.w], ys: [b.y, b.y + b.h / 2, b.y + b.h] });
+function unionBox(objs) {
+  const bs = objs.map(bbox);
+  const x1 = Math.min(...bs.map(b => b.x)), y1 = Math.min(...bs.map(b => b.y));
+  return { x: x1, y: y1, w: Math.max(...bs.map(b => b.x + b.w)) - x1, h: Math.max(...bs.map(b => b.y + b.h)) - y1 };
+}
+function snapTargets(moving) {
+  const xs = [], ys = [];
+  const add = b => { const l = linesOf(b); xs.push(...l.xs); ys.push(...l.ys); };
+  for (const o of objects) if (!moving.includes(o) && o.type !== 'canvas') add(bbox(o));
+  if (!isInf()) add({ x: 0, y: 0, w: frame.w, h: frame.h });
+  return { xs, ys, box: moving.length ? unionBox(moving) : null };
+}
+// The closest target line to any of `mine` (already offset by d), as a correction and the line.
+function nearest(mine, targets, d) {
+  let best = null;
+  for (const m of mine) for (const t of targets) {
+    const diff = t - (m + d);
+    if (Math.abs(diff) * zoom <= SNAP_PX && (!best || Math.abs(diff) < Math.abs(best.diff))) best = { diff, at: t };
+  }
+  return best;
+}
+function snapMove(dx, dy, off) {
+  const s = drag.snap;
+  drag.guides = [];
+  if (off || !s || !s.box) return [dx, dy];
+  const l = linesOf(s.box);
+  const nx = nearest(l.xs, s.xs, dx), ny = nearest(l.ys, s.ys, dy);
+  if (nx) { dx += nx.diff; }
+  if (ny) { dy += ny.diff; }
+  // show every line the moved box now sits on
+  const eq = (a, b) => Math.abs(a - b) < 0.01;
+  for (const x of l.xs) if (s.xs.some(t => eq(t, x + dx))) drag.guides.push({ x: x + dx });
+  for (const y of l.ys) if (s.ys.some(t => eq(t, y + dy))) drag.guides.push({ y: y + dy });
+  return [dx, dy];
 }
 function rectOf(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; }
 function shiftObj(o, a, dx, dy) {
-  if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
+  if (a.pts) o.pts = a.pts.map((v, i) => v + (i % 2 ? dy : dx));
+  else if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
   else { o.x = a.x + dx; o.y = a.y + dy; }
 }
 cv.addEventListener('pointermove', e => {
@@ -1700,6 +1792,21 @@ cv.addEventListener('pointermove', e => {
   if (!drag) return updateHover(p);
   if (drag.mode === 'pan') { viewX = drag.vx - (e.clientX - drag.cx) / zoom; viewY = drag.vy - (e.clientY - drag.cy) / zoom; if (editing) styleEditor(); render(); return; }
   const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+  if (drag.mode === 'draw') {
+    const o = get(drag.id);
+    if (!o) return;
+    // Shift draws a straight segment from the last point; otherwise add points as the pointer travels
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    for (const ev of evs.length ? evs : [e]) {
+      const q = pt(ev);
+      if (e.shiftKey) { o.pts.length = Math.max(2, o.pts.length - (drag.straight ? 2 : 0)); o.pts.push(q.x, q.y); drag.straight = true; continue; }
+      drag.straight = false;
+      if (Math.hypot(q.x - drag.last.x, q.y - drag.last.y) * zoom < 1.5) continue;
+      o.pts.push(Math.round(q.x * 10) / 10, Math.round(q.y * 10) / 10);
+      drag.last = q;
+    }
+    render(); return;
+  }
   if (drag.mode === 'marquee') {
     if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
     drag.moved = true; drag.end = p;
@@ -1708,7 +1815,8 @@ cv.addEventListener('pointermove', e => {
   if (drag.mode === 'move') {
     if (!drag.moved && Math.hypot(dx, dy) * zoom < 3) return;
     drag.moved = true;
-    for (const a of drag.origs) { const o = get(a.id); if (o) shiftObj(o, a, dx, dy); }
+    const [sx, sy] = snapMove(dx, dy, e.altKey);
+    for (const a of drag.origs) { const o = get(a.id); if (o) shiftObj(o, a, sx, sy); }
     render(); return;
   }
   const o = sel();
@@ -1759,6 +1867,11 @@ function finishDrag() {
   if (!drag) return;
   const d = drag; drag = null;
   if (d.mode === 'pan') { document.body.classList.remove('panning'); return; }
+  if (d.mode === 'draw') {
+    const o = get(d.id);
+    if (o) pushHistory('Add ' + NAMES[o.type].toLowerCase());
+    setSel(null); refreshPanel(); render(); return;
+  }
   if (d.mode === 'marquee') {
     if (d.moved) {
       const r = rectOf(d.start, d.end);
@@ -1859,7 +1972,8 @@ function buildControl(key, t) {
       const wrap = el('div', 'rangeRow');
       const inp = el('input'), fmt = d.fmt || (v => String(v));
       const min = d.minFor && t.type in d.minFor ? d.minFor[t.type] : d.min;
-      Object.assign(inp, { type: 'range', min, max: d.max, step: d.step });
+      const max = d.maxFor && t.type in d.maxFor ? d.maxFor[t.type] : d.max;
+      Object.assign(inp, { type: 'range', min, max, step: d.step });
       inp.value = t[key];
       // Editable value box: type a number and press Enter (or leave the field) to apply.
       const out = el('input', 'val');
@@ -1869,7 +1983,7 @@ function buildControl(key, t) {
       const applyTyped = () => {
         const n = parseFloat(out.value);
         if (!isFinite(n)) { out.value = fmt(+inp.value); return; }
-        const v = clamp(d.parse ? d.parse(n) : n, +min, d.maxIn ?? d.max);
+        const v = clamp(d.parse ? d.parse(n) : n, +min, d.maxIn ?? max);
         inp.value = v; out.value = fmt(v);
         if (v !== t[key]) setProp(key, v, true);
       };
@@ -2369,7 +2483,7 @@ const endPan = () => { pan = null; document.body.classList.remove('panning'); };
 stage.addEventListener('pointerup', endPan);
 stage.addEventListener('pointercancel', endPan);
 
-const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', n: 'step', p: 'redact', c: 'canvas' };
+const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', d: 'pen', h: 'marker', n: 'step', p: 'redact', c: 'canvas' };
 document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (!$('#libModal').hidden) {

@@ -8,7 +8,9 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Infinite canvas**: start an endless canvas from the start screen to arrange screenshots and annotations freely. Paste images into the middle of the view (or drop them where you want them), drag empty space, middle-drag, hold `Space` or scroll with a trackpad to pan, use the mouse wheel or pinch to zoom, and **Fit** (`⌘0`) to see everything. Copy and PNG export cover all objects with a small margin
 - **Images are objects**: the screenshot you paste or open, and every image you paste after it, is its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size.
 - **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
-- **Annotation tools**: arrow, line, rectangle, ellipse, text, and auto-numbered step markers
+- **Annotation tools**: arrow, line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
+- **Pen and highlighter**: draw freehand strokes; the tool stays on so you can keep drawing, and `⇧` draws a straight segment. The highlighter blends with what's below, so text under it stays readable
+- **Snap guides**: while moving, objects snap their edges and centres to other objects and to the canvas, with a guide line; hold `⌥` / `Alt` to move freely
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
 - **Multiple selection**: `⇧`-click to add or remove objects, `⇧`-drag a box to add everything inside it, or `⌘A` for all. Drag any selected object to move them together; nudge, duplicate, reorder, delete, and copy work on the whole selection
@@ -46,6 +48,8 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Rectangle | `R` |
 | Ellipse | `E` |
 | Text | `T` |
+| Pen | `D` |
+| Highlighter | `H` |
 | Numbered step | `N` |
 | Redact | `P` |
 | Resize canvas | `C` |
@@ -71,8 +75,22 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Send backward / bring forward | `[` / `]` |
 | Nudge selection (×10 with `⇧`) | Arrow keys |
 | Constrain angle / proportions | Hold `⇧` while drawing |
+| Move without snapping | Hold `⌥` / `Alt` while dragging |
 
 On Windows and Linux, use `Ctrl` in place of `⌘`.
+
+## Tests
+
+Browser tests live in `tests/` and use [Playwright](https://playwright.dev). The app itself still has no dependencies or build step.
+
+```sh
+cd tests
+npm install
+npx playwright install chromium   # once
+npm test
+```
+
+They serve the repo with `python3 -m http.server` and cover copy and paste between tabs, multiple selection, snapping, the pen and highlighter, and the Recent popup. Set `CHROMIUM_PATH` to run them with a Chromium you already have.
 
 ## License
 

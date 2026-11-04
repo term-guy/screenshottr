@@ -989,6 +989,7 @@ function blobToImage(blob) {
 function addAsset(img, blob) {
   const key = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   assets.set(key, { img, blob });
+  assetURL(key).catch(() => {});
   return key;
 }
 // The pixels an object list needs, keyed by asset: { key: Blob }. Missing assets are skipped.
@@ -1015,6 +1016,7 @@ async function loadAssets(saved) {
     try {
       const blob = typeof v === 'string' ? dataURLToBlob(v) : v;
       assets.set(key, { img: await blobToImage(blob), blob });
+      if (typeof v === 'string') assetURLs.set(key, v); else assetURL(key).catch(() => {});
     } catch (e) { console.warn('Could not load image', key, e); }
   }
 }
@@ -1941,11 +1943,11 @@ function del() {
   refreshPanel(); render();
 }
 // Add a copy of `src` (from this or another document) shifted by `off`, and select it.
-function insertCopy(src, off, label) {
+function insertCopy(src, off, label, offY = off) {
   const c = clone(src);
   c.id = nextId++;
   if (c.type === 'step') c.n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
-  if ('x1' in c) { c.x1 += off; c.y1 += off; c.x2 += off; c.y2 += off; } else { c.x += off; c.y += off; }
+  if ('x1' in c) { c.x1 += off; c.y1 += offY; c.x2 += off; c.y2 += offY; } else { c.x += off; c.y += offY; }
   objects.push(c); selId = c.id;
   pushHistory(label + ' ' + NAMES[c.type].toLowerCase());
   selectMode(); render();
@@ -1957,31 +1959,119 @@ function duplicate() {
   insertCopy(o, 20, 'Duplicate');
 }
 
-// ---------- copy / paste annotations ----------
-// The system clipboard gets plain text (the text itself for text objects, a JSON
-// payload otherwise) so a paste can recognise what we copied, even in another tab.
+// ---------- copy / paste objects ----------
+// Copying an object puts three things on the system clipboard, in one synchronous `copy` event
+// (so it works on file:// and without clipboard permissions):
+//   text/html  - a visible version for other apps (the text, or the image as <img>) plus the
+//                object itself, with the pixels of any image, base64 JSON in a data attribute
+//   text/plain - the text of a text object, else the JSON payload
+// Pasting in any Screenshottr tab, window or browser reads the payload back, so text keeps its
+// style and images keep their pixels, crop and size.
 const CLIP_KEY = 'screenshottr/object';
-let objClip = null;      // { obj, text, pastes }
-function copyObject(o) {
+const INSTANCE = Math.random().toString(36).slice(2);
+let objClip = null;      // { objs, assets, from, pastes, sig }
+let pendingCopy = null;  // payload waiting for the copy event that ⌘C triggers
+// data URLs of assets, computed in the background so a copy can include them synchronously
+const assetURLs = new Map();
+async function assetURL(key) {
+  if (assetURLs.has(key)) return assetURLs.get(key);
+  const blob = (await usedAssets([{ type: 'image', src: key }]))[key];
+  const url = blob ? await blobToDataURL(blob) : null;
+  if (url) assetURLs.set(key, url);
+  return url;
+}
+function toB64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function fromB64(b64) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+const escHTML = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function clipPayload(objs, urls) {
+  const data = { [CLIP_KEY]: 1, from: INSTANCE, objects: objs, assets: urls };
+  const json = JSON.stringify(data);
+  const visible = objs.map(o =>
+    o.type === 'text' ? '<p>' + escHTML(o.text).replace(/\n/g, '<br>') + '</p>'
+    : o.type === 'image' && urls[o.src] ? '<img src="' + urls[o.src] + '" width="' + Math.round(o.w) + '" height="' + Math.round(o.h) + '">'
+    : '').join('');
+  const html = '<meta charset="utf-8"><div data-screenshottr="' + toB64(json) + '">' + (visible || '<span></span>') + '</div>';
+  const plain = objs.every(o => o.type === 'text') ? objs.map(o => o.text).join('\n') : json;
+  return { html, plain, data };
+}
+async function copyObject(o) {
   commitEdit();
-  const obj = clone(o);
-  const text = o.type === 'text' ? o.text : JSON.stringify({ [CLIP_KEY]: obj });
-  objClip = { obj, text, pastes: 0 };
-  navigator.clipboard?.writeText(text).catch(() => {});
+  const objs = [clone(o)];
+  const keys = [...new Set(objs.filter(x => x.type === 'image').map(x => x.src))];
+  const urls = {};
+  const ready = keys.every(k => assetURLs.has(k));
+  if (ready) {
+    for (const k of keys) urls[k] = assetURLs.get(k);
+    pendingCopy = clipPayload(objs, urls);
+    if (!document.execCommand('copy') || pendingCopy) { pendingCopy = null; toast('Could not copy'); return; }
+  } else {
+    // The image's pixels are still being encoded: write with the async clipboard API instead.
+    const p = (async () => { for (const k of keys) urls[k] = await assetURL(k); return clipPayload(objs, urls); })();
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': p.then(c => new Blob([c.html], { type: 'text/html' })),
+        'text/plain': p.then(c => new Blob([c.plain], { type: 'text/plain' })),
+      })]);
+    } catch (e) { console.error(e); toast('Could not copy'); return; }
+  }
+  objClip = { objs, assets: urls, from: INSTANCE, pastes: 0, sig: JSON.stringify(objs) };
   toast('Copied ' + NAMES[o.type].toLowerCase());
 }
-function clipObjectFrom(text) {
-  if (objClip && text === objClip.text) return objClip;
-  if (!text || text[0] !== '{') return null;
-  try {
-    const obj = JSON.parse(text)[CLIP_KEY];
-    if (obj && NAMES[obj.type] && obj.type !== 'canvas' && (obj.type !== 'image' || assets.has(obj.src))) return objClip = { obj, text, pastes: 0 };
-  } catch (e) {}
-  return null;
+document.addEventListener('copy', e => {
+  if (!pendingCopy) return;
+  e.preventDefault();
+  e.clipboardData.setData('text/html', pendingCopy.html);
+  e.clipboardData.setData('text/plain', pendingCopy.plain);
+  pendingCopy = null;
+});
+function validClipObjs(objs) {
+  return Array.isArray(objs) && objs.length && objs.every(o => o && NAMES[o.type] && o.type !== 'canvas');
 }
-function pasteObject(clip) {
+// The copied objects in a paste, from our HTML payload, or a JSON payload in plain text
+// (older versions), or null when the clipboard holds something else.
+function clipFrom(cd) {
+  let data = null;
+  const html = cd.getData('text/html');
+  const m = html && html.match(/data-screenshottr="([A-Za-z0-9+/=]+)"/);
+  if (m) try { data = JSON.parse(fromB64(m[1])); } catch (e) {}
+  if (!data) {
+    const text = cd.getData('text/plain');
+    if (text && text[0] === '{') try {
+      const d = JSON.parse(text);
+      if (d[CLIP_KEY] === 1) data = d;
+      else if (d[CLIP_KEY]) data = { objects: [d[CLIP_KEY]], assets: {} };   // older single-object format
+    } catch (e) {}
+  }
+  if (!data || !validClipObjs(data.objects)) return null;
+  const sig = JSON.stringify(data.objects);
+  if (objClip && objClip.sig === sig) return objClip;   // pasting the same copy again: keep stepping the offset
+  return objClip = { objs: data.objects, assets: data.assets || {}, from: data.from, pastes: 0, sig };
+}
+async function pasteObjects(clip) {
+  await loadAssets(clip.assets);
+  for (const [k, url] of Object.entries(clip.assets)) if (!assetURLs.has(k)) assetURLs.set(k, url);
+  const objs = clip.objs.filter(o => o.type !== 'image' || assets.has(o.src));
+  if (!objs.length) { toast('Could not paste: the image is missing'); return; }
+  commitEdit();
   clip.pastes++;
-  insertCopy(clip.obj, 20 * clip.pastes, 'Paste');
+  // From this tab: step down-right from the original. From another tab: centre in the view.
+  let dx = 20 * clip.pastes, dy = dx;
+  if (clip.from !== INSTANCE) {
+    const b = objs.map(bbox).reduce((a, r) => ({ x1: Math.min(a.x1, r.x), y1: Math.min(a.y1, r.y), x2: Math.max(a.x2, r.x + r.w), y2: Math.max(a.y2, r.y + r.h) }), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
+    const vc = viewCenter();
+    dx = Math.round(vc.x - (b.x1 + b.x2) / 2) + 20 * (clip.pastes - 1);
+    dy = Math.round(vc.y - (b.y1 + b.y2) / 2) + 20 * (clip.pastes - 1);
+  }
+  for (const o of objs) insertCopy(o, dx, 'Paste', dy);
 }
 function reorder(dir) {
   const o = sel();
@@ -2070,6 +2160,8 @@ for (const b of ['#copyBtn', '#saveBtn', '#projBtn', '#zoomIn', '#zoomOut', '#zo
 let pasteAsNew = false;  // set by ⌘⇧V / Ctrl+Shift+V just before its paste event
 document.addEventListener('paste', e => {
   if (editing || e.target.closest?.('input, textarea, select')) return;
+  const clip = base && e.clipboardData && clipFrom(e.clipboardData);
+  if (clip) { e.preventDefault(); pasteAsNew = false; pasteObjects(clip); return; }
   const items = e.clipboardData ? [...e.clipboardData.items] : [];
   const img = items.find(it => it.type.startsWith('image/'));
   if (img) {
@@ -2083,8 +2175,6 @@ document.addEventListener('paste', e => {
   }
   pasteAsNew = false;
   const text = e.clipboardData && e.clipboardData.getData('text/plain');
-  const clip = base && clipObjectFrom(text);
-  if (clip) { e.preventDefault(); pasteObject(clip); return; }
   if (text && base) {
     e.preventDefault();
     const vc = viewCenter();

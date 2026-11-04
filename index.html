@@ -47,7 +47,7 @@
   input.tb.label { width: 58px; text-align: center; cursor: text; outline: none; }
   input.tb.label:focus { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--accent); }
   .spacer { flex: 1; }
-  #dims { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  #dims { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   /* ---------- layout ---------- */
   main { display: grid; grid-template-columns: 1fr 268px; min-height: 0; }
@@ -102,13 +102,24 @@
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 40; display: grid; place-items: center; padding: 24px; }
   .modal[hidden] { display: none; }
   .sheet {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: min(980px, 100%); max-height: 100%;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: min(980px, 100%); max-height: calc(100vh - 48px);
+    min-height: 0;
     display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.5);
   }
   .sheetHead { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
   .sheetHead h2 { margin: 0; font-size: 15px; }
   .sheetHead .spacer { flex: 1; }
   .libGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; padding: 16px; overflow: auto; }
+  .sheet .libGrid { flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; align-content: start; grid-auto-rows: max-content; }
+  .menuWrap { position: relative; }
+  .menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 2; min-width: 180px; padding: 4px; display: flex; flex-direction: column;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  }
+  .menu[hidden] { display: none; }
+  header .menu { z-index: 50; }
+  .menu button { height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer; }
+  .menu button:hover { background: var(--accent-soft); }
   .card {
     position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer; background: var(--panel-2);
     text-align: left;
@@ -260,6 +271,14 @@
   <button class="tb label" id="zoomFit" title="Fit to window (⌘0)">Fit</button>
   <div class="spacer"></div>
   <span id="dims"></span>
+  <div class="menuWrap">
+    <button class="tb newBtn" id="newBtn" title="Start a new document" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New</button>
+    <div class="menu" role="menu" hidden>
+      <button role="menuitem" data-new="#emptyBlank">Blank canvas</button>
+      <button role="menuitem" data-new="#emptyInfinite">Infinite canvas</button>
+      <button role="menuitem" data-new="#emptyOpen">Open image or project…</button>
+    </div>
+  </div>
   <button class="tb" id="libBtn" title="Recent images saved in this browser"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Recent</button>
   <button class="tb" id="openBtn" title="Open image or .sshot project (⌘O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></button>
   <button class="tb" id="projBtn" title="Save editable project file (.sshot) (⇧⌘S)"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg>Project</button>
@@ -307,6 +326,14 @@
       <h2>Recent images</h2><span class="muted">Saved automatically in this browser</span>
       <span class="spacer"></span>
       <button class="btn" id="libClear">Clear all</button>
+      <div class="menuWrap">
+        <button class="btn primary newBtn" id="libNew" title="Start a new document" aria-haspopup="menu" aria-expanded="false">New ▾</button>
+        <div class="menu" role="menu" hidden>
+          <button role="menuitem" data-new="#emptyBlank">Blank canvas</button>
+          <button role="menuitem" data-new="#emptyInfinite">Infinite canvas</button>
+          <button role="menuitem" data-new="#emptyOpen">Open image or project…</button>
+        </div>
+      </div>
       <button class="btn" id="libClose">Close</button>
     </div>
     <div class="libGrid" id="libGrid"></div>
@@ -977,6 +1004,7 @@ function rebuildPage() {
 // Show a document: an image plus (optionally) its saved canvas frame and annotations.
 function openDoc(img, { frame: f, objects: objs = [], id, name, label, view }) {
   commitEdit();
+  if (saveT) { clearTimeout(saveT); saveT = 0; saveDoc(); }   // keep the last edits of the document being left
   cropping = null;
   base = img;
   frame = f ? { ...f } : { w: img.width, h: img.height, ox: 0, oy: 0, bg: '#ffffff' };
@@ -1311,6 +1339,7 @@ async function renderLibrary(container, limit) {
     x.title = 'Remove from library';
     x.onclick = async ev => {
       ev.stopPropagation();
+      if (!confirm(`Remove "${rec.name || 'Untitled'}" from recent images? This can't be undone.`)) return;
       await DB.del(rec.id);
       card.remove();
       if (!container.children.length) renderLibrary(container, limit);
@@ -1336,7 +1365,23 @@ function openLibrary() {
   $('#libModal').hidden = false;
   renderLibrary($('#libGrid'));
 }
-function closeLibrary() { $('#libModal').hidden = true; }
+function closeLibrary() { $('#libModal').hidden = true; closeMenus(); }
+// "New" menus (toolbar and Recent popup): a menu shows the start screen's choices.
+function closeMenus() {
+  document.querySelectorAll('.menu').forEach(m => { m.hidden = true; m.previousElementSibling.setAttribute('aria-expanded', false); });
+}
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.newBtn'), item = e.target.closest('.menu [data-new]');
+  if (btn) {
+    const m = btn.nextElementSibling, open = m.hidden;
+    closeMenus();
+    if (open) { commitEdit(); m.hidden = false; btn.setAttribute('aria-expanded', true); }
+    return;
+  }
+  if (!e.target.closest('.menu')) closeMenus();
+  if (item) { closeMenus(); closeLibrary(); $(item.dataset.new).click(); }   // the start screen's buttons
+});
+const menuOpen = () => !![...document.querySelectorAll('.menu')].find(m => !m.hidden);
 async function renderEmptyRecent() {
   const box = $('#emptyRecent');
   box.innerHTML = '';
@@ -2328,9 +2373,10 @@ const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse',
 document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (!$('#libModal').hidden) {
-    if (e.key === 'Escape') closeLibrary();
+    if (e.key === 'Escape') menuOpen() ? closeMenus() : closeLibrary();
     return;
   }
+  if (e.key === 'Escape' && menuOpen()) { e.preventDefault(); closeMenus(); return; }
   if (mod && k === 'o') { e.preventDefault(); commitEdit(); $('#fileInput').click(); return; }
   if (mod && e.shiftKey && k === 'v') { pasteAsNew = true; setTimeout(() => { pasteAsNew = false; }, 1000); }   // the paste event follows
   if (editing) {

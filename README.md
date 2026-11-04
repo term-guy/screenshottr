@@ -19,7 +19,8 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Zoom**: type an exact zoom level, jump to 1:1, or fit to window
 - **Undo / redo** with full history
 - **Export**: copy to clipboard, save as PNG, or save an editable `.sshot` project file
-- **Recent images**: a local library of past work, stored in your browser (IndexedDB)
+- **New document**: the **New** menu in the toolbar (and in the Recent popup) starts a blank canvas, an infinite canvas, or opens a file
+- **Recent images**: a scrollable local library of past work, stored in your browser (IndexedDB); removing an entry asks for confirmation
 - **Private by design**: everything stays on your machine
 
 ## Getting started

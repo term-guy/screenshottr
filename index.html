@@ -480,6 +480,7 @@ function applyMode() {
 function drawInfBackground(c) {   // screen space: background colour and a dot grid that follows pan and zoom
   const W = cv.width, H = cv.height, d = DPR();
   c.fillStyle = frame.bg || '#e9e9ee'; c.fillRect(0, 0, W, H);
+  if (frame.noGrid) return;
   let g = 24;
   while (g * zoom < 12) g *= 2;
   while (g * zoom > 48) g /= 2;
@@ -1583,6 +1584,18 @@ function buildBgControls(props) {
   t.onclick = () => { setCanvasBg(frame.bg ? null : '#ffffff', true); refreshPanel(); };
   tr.append(t);
   props.append(tr);
+
+  if (isInf()) {   // the dot grid is screen-only: it never appears in exports
+    const gr = el('div', 'row rowInline');
+    gr.append(el('label', 'lab', 'Show grid'));
+    const gs = el('button', 'switch' + (frame.noGrid ? '' : ' on'));
+    gs.onclick = () => {
+      if (frame.noGrid) delete frame.noGrid; else frame.noGrid = true;
+      render(); pushHistory(frame.noGrid ? 'Hide grid' : 'Show grid'); refreshPanel();
+    };
+    gr.append(gs);
+    props.append(gr);
+  }
 }
 let toastT;
 function toast(msg) {

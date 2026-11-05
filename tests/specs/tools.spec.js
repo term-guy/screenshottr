@@ -83,3 +83,31 @@ test('the highlighter shows a text cursor, the pen a crosshair', async ({ page }
   await page.keyboard.press('d');
   expect(await cursorAt()).toBe('crosshair');
 });
+
+test('infinite canvas: the grid can be hidden and shown again, with undo', async ({ page }) => {
+  await openApp(page);
+  const toggle = page.locator('#props .row:has-text("Show grid") .switch');
+  // A canvas pixel that sits on a grid dot at 100% zoom (world 0,0 is 100px in).
+  const dot = () => page.evaluate(async () => {
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const d = DPR(), p = ctx.getImageData(Math.round(100 * d), Math.round(100 * d), 1, 1).data;
+    return p[0] < 250;
+  });
+  await expect(toggle).toHaveClass(/\bon\b/);
+  expect(await dot()).toBe(true);
+  await toggle.click();
+  await expect(toggle).not.toHaveClass(/\bon\b/);
+  expect(await page.evaluate(() => frame.noGrid)).toBe(true);
+  expect((await state(page)).last).toBe('Hide grid');
+  expect(await dot()).toBe(false);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await page.evaluate(() => !!frame.noGrid)).toBe(false);
+  expect(await dot()).toBe(true);
+  noErrors(page);
+});
+
+test('blank canvas has no grid switch', async ({ page }) => {
+  await openApp(page, 'blank');
+  await page.keyboard.press('v');
+  await expect(page.locator('#props .row:has-text("Show grid")')).toHaveCount(0);
+});

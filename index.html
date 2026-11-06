@@ -475,7 +475,12 @@ function applyMode() {
   document.body.classList.toggle('infinite', isInf());
   const cb = document.querySelector('.tool[data-tool="canvas"]');
   if (cb) cb.disabled = isInf();
-  if (isInf() && tool === 'canvas') tool = 'select';
+  if (isInf() && tool === 'canvas') {
+    tool = 'select';
+    document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === 'select'));
+    cv.style.cursor = 'default';
+    updateFrameBox();
+  }
 }
 function drawInfBackground(c) {   // screen space: background colour and a dot grid that follows pan and zoom
   const W = cv.width, H = cv.height, d = DPR();
@@ -1002,6 +1007,7 @@ function gotoHistory(i) {
   if (i < 0 || i >= hist.length || i === hIdx) return;
   hIdx = i;
   const h = hist[i], s = JSON.parse(h.state);
+  const modeChanged = !!s.frame.infinite !== isInf();
   objects = s.objects;
   frame = s.frame;
   for (const o of objects) nextId = Math.max(nextId, o.id + 1);
@@ -1009,7 +1015,7 @@ function gotoHistory(i) {
   base = h.base; docId = h.docId; docName = h.docName;
   applyMode();
   rebuildPage();
-  if (imageChanged) fit();
+  if (imageChanged || modeChanged) fit();
   setSel(selIds.filter(id => get(id)));
   hoverId = null;
   resetFrameRect();
@@ -1500,6 +1506,54 @@ const endFrameDrag = () => {
 $('#frameBox').addEventListener('pointerup', endFrameDrag);
 $('#frameBox').addEventListener('pointercancel', endFrameDrag);
 
+// Does the base image have any visible pixels? Older documents keep their screenshot there.
+function baseHasPixels() {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(base, 0, 0);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  for (let i = 3; i < d.length; i += 4) if (d[i]) return true;
+  return false;
+}
+// Switch the open document between a regular and an infinite canvas (one undo step).
+// To regular: the canvas becomes what an infinite export covers, so the output looks the same.
+function convertCanvas() {
+  commitEdit();
+  endCrop(false);
+  const toInf = !isInf(), blank = document.createElement('canvas');
+  if (toInf) {
+    // Infinite canvases don't draw the base image, so a real one becomes the bottom image object.
+    if (baseHasPixels()) objects.unshift({ id: nextId++, type: 'image', opacity: 1, x: frame.ox, y: frame.oy, w: base.width, h: base.height, src: addAsset(base, baseBlobs.get(base)), iw: base.width, ih: base.height });
+    blank.width = blank.height = 1;
+    frame = { ...frame, w: 1, h: 1, ox: 0, oy: 0, infinite: true };
+  } else {
+    const b = objBounds(24) || { x1: 0, y1: 0, x2: 1600, y2: 1000 };
+    const w = b.x2 - b.x1, h = b.y2 - b.y1;
+    if (w > 16384 || h > 16384) return toast('Too large for a regular canvas (16384 px at most): move objects closer together');
+    for (const o of objects) shiftObj(o, o, -b.x1, -b.y1);
+    blank.width = w; blank.height = h;
+    const { infinite, ...rest } = frame;
+    frame = { ...rest, w, h, ox: 0, oy: 0 };
+  }
+  base = blank;
+  if (docName === (toInf ? 'Blank canvas' : 'Infinite canvas')) docName = toInf ? 'Infinite canvas' : 'Blank canvas';
+  hoverId = null;
+  applyMode();
+  rebuildPage();
+  fit();
+  resetFrameRect();
+  pushHistory(toInf ? 'Convert to infinite canvas' : 'Convert to regular canvas');
+  refreshPanel(); render();
+}
+function convertButton() {
+  const b = el('button', 'btn', isInf() ? 'Convert to regular canvas' : 'Convert to infinite canvas');
+  b.id = 'convertBtn';
+  b.style.gridColumn = '1 / -1';
+  b.title = isInf() ? 'Give the canvas a fixed size that fits all objects' : 'Remove the canvas edges: anything outside them becomes visible';
+  b.onclick = convertCanvas;
+  return b;
+}
 function contentBounds() {
   if (isInf()) return objBounds(2) || { x1: 0, y1: 0, x2: 1, y2: 1 };
   let x1 = frame.ox, y1 = frame.oy, x2 = frame.ox + base.width, y2 = frame.oy + base.height;
@@ -1554,6 +1608,7 @@ function buildCanvasPanel(props) {
   mk('Add 40px padding', () => applyFrame({ x1: -40, y1: -40, x2: frame.w + 40, y2: frame.h + 40 }, 'Add padding'));
   mk('Fit to image', () => applyFrame({ x1: frame.ox, y1: frame.oy, x2: frame.ox + base.width, y2: frame.oy + base.height }, 'Fit canvas to image'));
   mk('Fit to content', () => applyFrame(contentBounds(), 'Fit canvas to content'));
+  a.append(convertButton());
   a.style.marginBottom = '14px';
   props.append(a);
 
@@ -2119,6 +2174,7 @@ function refreshPanel() {
       rc.onclick = () => setTool('canvas');
       a.append(rc);
     } else props.append(el('p', 'hint', 'Infinite canvas: drag empty space, middle-drag or hold Space to pan; scroll or pinch to zoom; Fit (⌘0) shows everything. Export covers all objects.'));
+    a.append(convertButton());
     if (objects.some(x => x.type !== 'image')) {   // annotations only: the screenshot and pasted images stay
       const b = el('button', 'btn danger', 'Clear all annotations');
       b.style.gridColumn = '1 / -1';

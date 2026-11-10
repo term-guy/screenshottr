@@ -43,6 +43,21 @@ test('removing a recent image asks first', async ({ page }) => {
   await expect(page.locator('#libGrid .card')).toHaveCount(39);
 });
 
+test('Recent thumbnails show the canvas colour, the checkerboard only when transparent', async ({ page }) => {
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 400; c.height = 100;
+    const rec = (id, bg) => ({ id, name: id, updated: Date.now() + 1000, frame: { w: 400, h: 100, ox: 0, oy: 0, bg },
+      objects: [], thumb: c.toDataURL(), image: null });
+    await DB.put(rec('dark', '#123456'));
+    await DB.put(rec('clear', null));
+  });
+  await page.reload();
+  const thumb = name => page.locator('#emptyRecent .card', { hasText: name }).locator('.thumb');
+  await expect(thumb('dark')).toHaveCSS('background-color', 'rgb(18, 52, 86)');
+  await expect(thumb('dark')).not.toHaveClass(/checker/);
+  await expect(thumb('clear')).toHaveClass(/checker/);
+});
+
 test('New menus start documents from the toolbar and the popup', async ({ page }) => {
   await page.click('#newBtn');
   await page.click('#newBtn + .menu >> text=Infinite canvas');

@@ -1385,7 +1385,9 @@ async function renderLibrary(container, limit) {
   }
   for (const rec of all) {
     const card = el('div', 'card' + (rec.id === docId ? ' cur' : ''));
-    const th = el('div', 'thumb checker'), im = el('img');
+    // the box around the thumbnail shows the canvas colour; the checkerboard only for a transparent canvas
+    const bg = rec.frame && rec.frame.bg, th = el('div', 'thumb' + (bg ? '' : ' checker')), im = el('img');
+    if (bg) th.style.background = bg;
     im.src = rec.thumb; im.alt = '';
     th.append(im);
     const meta = el('div', 'meta');
@@ -2524,18 +2526,23 @@ function wheelZoomStep(z, dir) {
   const n = dir > 0 ? Math.floor(p / step + 1e-6) + 1 : Math.ceil(p / step - 1e-6) - 1;
   return n * step / 100;
 }
+// The wheel scrolls (Shift for sideways); Ctrl/⌘ + wheel zooms at the pointer.
 stage.addEventListener('wheel', e => {
   if (!base) return;
-  e.preventDefault();
-  const pinch = e.ctrlKey || e.metaKey;
-  const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 100 : e.deltaY;
-  if (pinch) { zoomAt(zoom * Math.exp(-dy * 0.01), e.clientX, e.clientY); return; }
-  if (isInf()) {
-    // A mouse wheel notch (line/page units, or Chrome/Safari's wheelDelta in steps of 120) zooms;
-    // trackpad scrolling (pixel deltas, also sideways) pans.
-    const notch = e.deltaMode !== 0 || (e.wheelDeltaY && !e.deltaX && Math.abs(e.wheelDeltaY) % 120 === 0);
-    if (!notch) { const dx = e.deltaMode === 1 ? e.deltaX * 33 : e.deltaX; panBy((e.shiftKey && !dx ? dy : dx) / zoom, (e.shiftKey && !dx ? 0 : dy) / zoom); return; }
+  const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 100 : 1;
+  const dy = e.deltaY * unit, dx = e.deltaX * unit;
+  if (!(e.ctrlKey || e.metaKey)) {
+    if (!isInf()) return;   // regular canvas: the stage scrolls natively
+    e.preventDefault();
+    const side = e.shiftKey && !dx;
+    panBy((side ? dy : dx) / zoom, (side ? 0 : dy) / zoom);
+    return;
   }
+  e.preventDefault();
+  // A mouse wheel notch (line/page units, or Chrome/Safari's wheelDelta in steps of 120) zooms in
+  // steps; a trackpad pinch (reported as Ctrl + pixel deltas) zooms smoothly.
+  const notch = e.deltaMode !== 0 || (e.wheelDeltaY && !e.deltaX && Math.abs(e.wheelDeltaY) % 120 === 0);
+  if (!notch) { zoomAt(zoom * Math.exp(-dy * 0.01), e.clientX, e.clientY); return; }
   if (Math.sign(dy) !== Math.sign(wheelAcc) || e.timeStamp - wheelT > 250) wheelAcc = 0;
   wheelT = e.timeStamp;
   wheelAcc += dy;

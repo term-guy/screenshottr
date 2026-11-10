@@ -5,7 +5,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 ## Features
 
 - **Paste, drop, or open**: paste with `⌘V` / `Ctrl V`, drag an image onto the window, or start from a blank canvas
-- **Infinite canvas**: start an endless canvas from the start screen to arrange screenshots and annotations freely. Paste images into the middle of the view (or drop them where you want them), drag empty space, middle-drag, hold `Space` or scroll with a trackpad to pan, use the mouse wheel or pinch to zoom, and **Fit** (`⌘0`) to see everything. Copy and PNG export cover all objects with a small margin. **Convert to infinite canvas** / **Convert to regular canvas** in the Properties panel (with nothing selected) switches an open document either way; going to regular sizes the canvas to fit all objects with that same margin, and going to infinite removes the canvas edges, so anything cropped off by them becomes visible again
+- **Infinite canvas**: start an endless canvas from the start screen to arrange screenshots and annotations freely. Paste images into the middle of the view (or drop them where you want them), drag empty space, middle-drag, hold `Space` or scroll (mouse wheel or trackpad, `⇧` for sideways) to pan, use `Ctrl` + mouse wheel or pinch to zoom, and **Fit** (`⌘0`) to see everything. Copy and PNG export cover all objects with a small margin. **Convert to infinite canvas** / **Convert to regular canvas** in the Properties panel (with nothing selected) switches an open document either way; going to regular sizes the canvas to fit all objects with that same margin, and going to infinite removes the canvas edges, so anything cropped off by them becomes visible again
 - **Images are objects**: the screenshot you paste or open, and every image you paste after it, is its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size.
 - **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
@@ -65,8 +65,8 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Save `.sshot` project | `⇧⌘S` |
 | Undo / Redo | `⌘Z` / `⇧⌘Z` |
 | Zoom in / out | `⌘+` / `⌘−` |
-| Zoom at pointer | Mouse wheel (10% steps) or trackpad pinch |
-| Pan | Middle-click and drag (infinite canvas: also drag empty space, `Space`+drag, or trackpad scroll) |
+| Zoom at pointer | `Ctrl` + mouse wheel (10% steps) or trackpad pinch |
+| Scroll / pan | Mouse wheel or trackpad scroll (`⇧` + wheel scrolls sideways), or middle-click and drag (infinite canvas: also drag empty space or `Space`+drag) |
 | Actual size (100%) | `⌘1` |
 | Fit to window | `⌘0` |
 | Set exact zoom | Click the zoom %, type a value, `Enter` |

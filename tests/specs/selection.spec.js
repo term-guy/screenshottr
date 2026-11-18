@@ -71,3 +71,18 @@ test('Alt turns snapping off', async ({ page }) => {
   await drag(page, [50, 230], [254, 230], ['Alt']);
   expect((await state(page)).objects[2].x).toBe(204);
 });
+
+test('a dragged image lands on whole pixels, even when the zoom makes the pointer move by fractions', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 30;
+    c.getContext('2d').fillRect(0, 0, 40, 30);
+    await addImageObject(await toBlob(c), 'test image', { x: 70, y: 65 });
+    setZoom(1.37); viewX = -100; viewY = -100; render();
+  });
+  await drag(page, [60, 60], [73.3, 81.7]);
+  const o = (await state(page)).objects.find(x => x.type === 'image');
+  expect(o.x).not.toBe(50);
+  expect(Number.isInteger(o.x) && Number.isInteger(o.y)).toBe(true);
+  noErrors(page);
+});

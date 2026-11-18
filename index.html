@@ -756,8 +756,24 @@ function drawImageObj(c, o) {
     c.beginPath(); c.moveTo(b.x, b.y); c.lineTo(b.x + b.w, b.y + b.h); c.moveTo(b.x + b.w, b.y); c.lineTo(b.x, b.y + b.h); c.stroke();
     return;
   }
-  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   const k = o.crop || { x: 0, y: 0, w: a.img.width, h: a.img.height };
+  // Without rotation or skew, draw in device pixels with the corners snapped to whole pixels:
+  // a fractional offset (from dragging, or from the pan position of an infinite canvas) would
+  // otherwise resample every pixel and soften text in screenshots. At exactly one image pixel
+  // per device pixel, smoothing is turned off so the pixels are copied as they are.
+  const m = c.getTransform();
+  if (!m.b && !m.c) {
+    const x1 = Math.round(m.a * b.x + m.e), y1 = Math.round(m.d * b.y + m.f);
+    const x2 = Math.round(m.a * (b.x + b.w) + m.e), y2 = Math.round(m.d * (b.y + b.h) + m.f);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.imageSmoothingEnabled = !(x2 - x1 === k.w && y2 - y1 === k.h);
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(a.img, k.x, k.y, k.w, k.h, x1, y1, x2 - x1, y2 - y1);
+    c.setTransform(m);
+    c.imageSmoothingEnabled = true;
+    return;
+  }
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   c.drawImage(a.img, k.x, k.y, k.w, k.h, b.x, b.y, b.w, b.h);
 }
 // ---------- image crop ----------
@@ -1874,6 +1890,7 @@ function rectOf(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w
 function shiftObj(o, a, dx, dy) {
   if (a.pts) o.pts = a.pts.map((v, i) => v + (i % 2 ? dy : dx));
   else if ('x1' in a) { o.x1 = a.x1 + dx; o.y1 = a.y1 + dy; o.x2 = a.x2 + dx; o.y2 = a.y2 + dy; }
+  else if (o.type === 'image') { o.x = Math.round(a.x + dx); o.y = Math.round(a.y + dy); }   // whole pixels keep screenshots sharp
   else { o.x = a.x + dx; o.y = a.y + dy; }
 }
 cv.addEventListener('pointermove', e => {

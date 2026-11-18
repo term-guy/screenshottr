@@ -231,3 +231,29 @@ test.describe('converting between regular and infinite canvases', () => {
     noErrors(page);
   });
 });
+
+test('new documents use the last canvas background and grid setting', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => { setCanvasBg('#1c1c1e', true); });
+  await page.evaluate(() => $('#emptyInfinite').click());   // start another document
+  let f = await page.evaluate(() => frame);
+  expect(f.bg).toBe('#1c1c1e');
+  await page.evaluate(() => { setCanvasBg(null, true); frame.noGrid = true; saveCanvasPref('noGrid', true); });
+  await page.reload();
+  await page.click('#emptyInfinite');
+  f = await page.evaluate(() => frame);
+  expect(f).toMatchObject({ bg: null, noGrid: true, infinite: true });
+  await page.reload();
+  await page.click('#emptyBlank');
+  f = await page.evaluate(() => frame);
+  expect(f.bg).toBe(null);
+  expect(f.noGrid).toBeUndefined();
+});
+
+test('arrow styles are remembered across reloads', async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => { setTool('arrow'); setProp('color', '#0a84ff', true); setProp('heads', 'both', true); });
+  await page.reload();
+  const s = await page.evaluate(() => styles.arrow);
+  expect(s).toMatchObject({ color: '#0a84ff', heads: 'both' });
+});

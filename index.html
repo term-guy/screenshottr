@@ -509,6 +509,20 @@ function loadStyles() {
 function saveStyles() {
   try { localStorage.setItem('screenshottr.styles', JSON.stringify(styles)); } catch (e) {}
 }
+// The last canvas background (null = transparent) and grid switch, used by new documents.
+function canvasPrefs() {
+  try { return { bg: '#ffffff', noGrid: false, ...JSON.parse(localStorage.getItem('screenshottr.canvas') || '{}') }; }
+  catch (e) { return { bg: '#ffffff', noGrid: false }; }
+}
+function saveCanvasPref(k, v) {
+  try { localStorage.setItem('screenshottr.canvas', JSON.stringify({ ...canvasPrefs(), [k]: v })); } catch (e) {}
+}
+// A new document's frame with the remembered canvas settings.
+function newFrame(w, h, infinite) {
+  const c = canvasPrefs(), f = { w, h, ox: 0, oy: 0, bg: c.bg };
+  if (infinite) { f.infinite = true; if (c.noGrid) f.noGrid = true; }
+  return f;
+}
 
 const get = id => objects.find(o => o.id === id);
 // The selected object when exactly one is selected (handles, properties, cropping, text editing).
@@ -1080,7 +1094,7 @@ function openDoc(img, { frame: f, objects: objs = [], id, name, label, view }) {
   if (saveT) { clearTimeout(saveT); saveT = 0; saveDoc(); }   // keep the last edits of the document being left
   cropping = null;
   base = img;
-  frame = f ? { ...f } : { w: img.width, h: img.height, ox: 0, oy: 0, bg: '#ffffff' };
+  frame = f ? { ...f } : newFrame(img.width, img.height);
   applyMode();
   objects = clone(objs);
   for (const o of objects) nextId = Math.max(nextId, o.id + 1);
@@ -1588,7 +1602,7 @@ function contentBounds() {
 function setCanvasBg(bg, commit) {
   frame.bg = bg;
   rebuildPage(); updateFrameBox(); render();
-  if (commit) pushHistory('Canvas background', 'canvas-bg');
+  if (commit) { pushHistory('Canvas background', 'canvas-bg'); saveCanvasPref('bg', bg); }
 }
 function buildCanvasPanel(props) {
   props.append(el('p', 'hint', 'Drag the handles around the canvas to add space or crop. Hold ⌥/Alt to resize both sides. The image and annotations keep their size.'));
@@ -1667,6 +1681,7 @@ function buildBgControls(props) {
     const gs = el('button', 'switch' + (frame.noGrid ? '' : ' on'));
     gs.onclick = () => {
       if (frame.noGrid) delete frame.noGrid; else frame.noGrid = true;
+      saveCanvasPref('noGrid', !!frame.noGrid);
       render(); pushHistory(frame.noGrid ? 'Hide grid' : 'Show grid'); refreshPanel();
     };
     gr.append(gs);
@@ -1774,14 +1789,14 @@ cv.addEventListener('pointerdown', e => {
   if (isInf() && spaceDown) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); return; }
   if (cropping) {   // handles trim the crop, a drag inside slides it, a click elsewhere applies it
     const o = get(cropping.id), k = o && hitHandle(o, p);
-    if (k) { drag = { mode: 'crop', k, start: p, orig: clone(o) }; return; }
-    if (o && inBox(p, norm(o))) { drag = { mode: 'crop-pan', start: p, orig: clone(o) }; return; }
+    if (k) { drag = { mode: 'crop', k, start: p, orig: clone(o), snap: snapTargets([o]) }; return; }
+    if (o && inBox(p, norm(o))) { drag = { mode: 'crop-pan', start: p, orig: clone(o), snap: snapTargets([o]) }; return; }
     endCrop(true);
   }
   const s = sel();
   if (s) {
     const k = hitHandle(s, p);
-    if (k) { drag = { mode: 'handle', k, start: p, orig: clone(s) }; return; }
+    if (k) { drag = { mode: 'handle', k, start: p, orig: clone(s), snap: snapTargets([s]) }; return; }
   }
   if (tool === 'select') {
     const o = hitTest(p);
@@ -1886,6 +1901,25 @@ function snapMove(dx, dy, off) {
   for (const y of l.ys) if (s.ys.some(t => eq(t, y + dy))) drag.guides.push({ y: y + dy });
   return [dx, dy];
 }
+// Resizing and cropping: the dragged edge(s) snap to the same lines (other objects' edges and centres,
+// the canvas), so an object can be sized or a screenshot trimmed to line up with what is around it.
+// Line and arrow ends snap both ways; a text box's handle only sets its width.
+function snapHandle(o, k, p, off) {
+  const s = drag.snap;
+  drag.guides = [];
+  if (off || !s) return p;
+  const q = { x: p.x, y: p.y }, end = k === 'p1' || k === 'p2';
+  if (end || k.includes('w') || k.includes('e')) { const n = nearest([p.x], s.xs, 0); if (n) { q.x = n.at; drag.guides.push({ x: n.at }); } }
+  if (end || ((k.includes('n') || k.includes('s')) && o.type !== 'text')) { const n = nearest([p.y], s.ys, 0); if (n) { q.y = n.at; drag.guides.push({ y: n.at }); } }
+  return q;
+}
+// Keep only the guides the object's edges or centres reached (within `tol`): clamps, whole pixels
+// and kept aspect ratios can stop an edge short of the line the pointer snapped to.
+function keepReachedGuides(b, tol) {
+  if (!drag.guides || !drag.guides.length) return;
+  const l = linesOf(b);
+  drag.guides = drag.guides.filter(g => ('x' in g ? l.xs : l.ys).some(v => Math.abs(v - ('x' in g ? g.x : g.y)) <= tol));
+}
 function rectOf(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; }
 function shiftObj(o, a, dx, dy) {
   if (a.pts) o.pts = a.pts.map((v, i) => v + (i % 2 ? dy : dx));
@@ -1938,11 +1972,22 @@ cv.addEventListener('pointermove', e => {
       o.w = w; o.h = h;
     }
   } else if (drag.mode === 'handle') {
-    applyHandle(o, drag.orig, drag.k, p, e.shiftKey);
+    // Shift on a line end constrains its angle, so it doesn't snap then
+    const q = snapHandle(o, drag.k, p, e.altKey || (e.shiftKey && 'x1' in o));
+    applyHandle(o, drag.orig, drag.k, q, e.shiftKey);
+    if ('x1' in o) {   // a line end: guides through the point it sits on
+      const end = drag.k === 'p1' ? { x: o.x1, y: o.y1 } : { x: o.x2, y: o.y2 };
+      keepReachedGuides({ x: end.x, y: end.y, w: 0, h: 0 }, 0.01);
+    } else keepReachedGuides(bbox(o), 0.01);
   } else if (drag.mode === 'crop') {
-    applyCropHandle(o, drag.orig, drag.k, p);
+    applyCropHandle(o, drag.orig, drag.k, snapHandle(o, drag.k, p, e.altKey));
   } else if (drag.mode === 'crop-pan') {
-    panCrop(o, drag.orig, dx, dy);
+    const [sx, sy] = snapMove(dx, dy, e.altKey);
+    panCrop(o, drag.orig, sx, sy);
+  }
+  if (drag.mode === 'crop' || drag.mode === 'crop-pan') {   // the crop ends on whole source pixels and inside the image
+    const f = fullRect(o);
+    keepReachedGuides(norm(o), Math.max(f.sx, f.sy) / 2 + 0.01);
   }
   render();
 });
@@ -2487,7 +2532,7 @@ $('#fileInput').onchange = e => { loadFile(e.target.files[0]); e.target.value = 
 $('#emptyInfinite').onclick = () => {
   const c = document.createElement('canvas');
   c.width = c.height = 1;
-  openDoc(c, { name: 'Infinite canvas', label: 'Infinite canvas', frame: { w: 1, h: 1, ox: 0, oy: 0, bg: '#ffffff', infinite: true } });
+  openDoc(c, { name: 'Infinite canvas', label: 'Infinite canvas', frame: newFrame(1, 1, true) });
 };
 $('#emptyBlank').onclick = () => {
   const c = document.createElement('canvas');

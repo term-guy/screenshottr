@@ -86,3 +86,77 @@ test('a dragged image lands on whole pixels, even when the zoom makes the pointe
   expect(Number.isInteger(o.x) && Number.isInteger(o.y)).toBe(true);
   noErrors(page);
 });
+
+// Crop: a 200x100 image at (0, 300), a rect whose left edge is at x = 150 and bottom at y = 380.
+async function cropSetup(page) {
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 200; c.height = 100;
+    c.getContext('2d').fillRect(0, 0, 200, 100);
+    await addImageObject(await toBlob(c), 'test image', { x: 0, y: 300 });
+    const o = objects.find(x => x.type === 'image');
+    o.x = 0; o.y = 300;
+    newObj('rect', { x: 150, y: 420, w: 40, h: -40 });
+    startCrop(o); render();
+  });
+}
+const img = async page => (await state(page)).objects.find(x => x.type === 'image');
+
+test('a crop edge snaps to other objects, with a guide', async ({ page }) => {
+  await cropSetup(page);
+  const a = await screen(page, 200, 350), b = await screen(page, 154, 350);   // east handle to 4px past x = 150
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 6 });
+  const guides = await page.evaluate(() => drag && drag.guides);
+  await page.mouse.up();
+  const o = await img(page);
+  expect(o.x + o.w).toBe(150);
+  expect(o.crop).toMatchObject({ x: 0, w: 150 });
+  expect(guides).toContainEqual({ x: 150 });
+  noErrors(page);
+});
+
+test('a corner crop handle snaps both ways, and Alt turns it off', async ({ page }) => {
+  await cropSetup(page);
+  await drag(page, [200, 400], [153, 383]);   // south-east corner near (150, 380)
+  let o = await img(page);
+  expect([o.x + o.w, o.y + o.h]).toEqual([150, 380]);
+  await page.evaluate(() => { const o = objects.find(x => x.type === 'image'); endCrop(false); startCrop(o); render(); });
+  await drag(page, [200, 400], [153, 383], ['Alt']);
+  o = await img(page);
+  expect([o.x + o.w, o.y + o.h]).toEqual([153, 383]);
+});
+
+test('sliding the crop snaps its edges', async ({ page }) => {
+  await cropSetup(page);
+  await drag(page, [200, 400], [100, 400], ['Alt']);   // crop to 100 wide: x 0..100
+  await drag(page, [50, 350], [97, 350]);   // slide right; right edge 147 snaps to 150
+  const o = await img(page);
+  expect(o.x).toBe(50);
+  expect(o.crop).toMatchObject({ x: 50, w: 100 });
+  noErrors(page);
+});
+
+test('resizing snaps the dragged edge to other objects, with a guide; Alt turns it off', async ({ page }) => {
+  await click(page, 50, 230);   // third rect: x 0..100, y 200..280
+  const a = await screen(page, 100, 240), b = await screen(page, 204, 240);   // east handle to 4px past x = 200
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 6 });
+  const guides = await page.evaluate(() => drag && drag.guides);
+  await page.mouse.up();
+  expect((await state(page)).objects[2]).toMatchObject({ x: 0, w: 200 });
+  expect(guides).toContainEqual({ x: 200 });
+  await drag(page, [200, 240], [304, 240], ['Alt']);
+  expect((await state(page)).objects[2].w).toBe(304);
+  noErrors(page);
+});
+
+test('a line end snaps to other objects', async ({ page }) => {
+  await addObjects(page, [['line', { x1: 150, y1: 150, x2: 250, y2: 160 }]]);
+  await click(page, 200, 155);
+  await drag(page, [250, 160], [297, 163]);   // x snaps to the second rect's right edge (300); no line near y = 163
+  const l = (await state(page)).objects.find(o => o.type === 'line');
+  expect([l.x2, l.y2]).toEqual([300, 163]);
+  noErrors(page);
+});

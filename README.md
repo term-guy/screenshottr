@@ -10,7 +10,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
 - **Annotation tools**: arrow, line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
 - **Pen and highlighter**: draw freehand strokes; the tool stays on so you can keep drawing, and `⇧` draws a straight segment. The highlighter blends with what's below so text under it stays readable, on light and dark backgrounds alike (it picks the blend from where the stroke starts; switch it under **Background** in the panel)
-- **Snap guides**: while moving, objects snap their edges and centres to other objects and to the canvas, with a guide line; hold `⌥` / `Alt` to move freely
+- **Snap guides**: while moving, objects snap their edges and centres to other objects and to the canvas, with a guide line; resizing snaps the dragged edges (and line or arrow ends) the same way, and cropping an image snaps its crop edges (and, when sliding the crop, its centre) to those same lines, so a trimmed screenshot lines up with what is around it; hold `⌥` / `Alt` to move, resize or crop freely
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
 - **Multiple selection**: `⇧`-click to add or remove objects, `⇧`-drag a box to add everything inside it, or `⌘A` for all. Drag any selected object to move them together; nudge, duplicate, reorder, delete, and copy work on the whole selection
@@ -22,6 +22,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Undo / redo** with full history
 - **Export**: copy to clipboard, save as PNG, or save an editable `.sshot` project file
 - **New document**: the **New** menu in the toolbar (and in the Recent popup) starts a blank canvas, an infinite canvas, or opens a file
+- **Remembers your settings**: each tool keeps the style you last used (arrow colour, weight and heads, text font and background, and so on), and new documents get the canvas background (or transparency) and grid setting you last picked; stored in your browser
 - **Recent images**: a scrollable local library of past work, stored in your browser (IndexedDB); removing an entry asks for confirmation
 - **Private by design**: everything stays on your machine
 

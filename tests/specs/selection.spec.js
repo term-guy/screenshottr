@@ -199,3 +199,16 @@ test.describe('box select tool', () => {
     expect((await state(page)).sel).toEqual([1, 3]);
   });
 });
+
+test('regular canvas: dragging empty space with Select draws a selection box', async ({ page }) => {
+  await openApp(page, 'regular');
+  await addObjects(page, [['rect', { x: 100, y: 100, w: 100, h: 80, fillOn: true }], ['rect', { x: 400, y: 100, w: 100, h: 80, fillOn: true }]]);
+  await click(page, 450, 140);
+  await drag(page, [50, 50], [250, 250]);
+  expect((await state(page)).sel).toEqual([1]);   // replaces the selection
+  await drag(page, [600, 50], [350, 250], ['Shift']);
+  expect((await state(page)).sel).toEqual([1, 2]);
+  await click(page, 700, 600);
+  expect((await state(page)).sel).toEqual([]);
+  noErrors(page);
+});

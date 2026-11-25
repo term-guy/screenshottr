@@ -1887,7 +1887,9 @@ cv.addEventListener('pointerdown', e => {
     if (o && !isSel(o.id)) setSel(g);
     if (o) { startMove(p, false); drag.collapse = collapse; }
     else if (selIds.length) setSel(null);
+    // Empty space: an infinite canvas pans, a regular one draws a selection box
     if (!o && isInf()) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); }
+    else if (!o) drag = { mode: 'marquee', start: p, end: p, hit: null, moved: false };
     refreshPanel(); render();
     return;
   }

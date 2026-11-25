@@ -160,3 +160,42 @@ test('a line end snaps to other objects', async ({ page }) => {
   expect([l.x2, l.y2]).toEqual([300, 163]);
   noErrors(page);
 });
+
+test.describe('box select tool', () => {
+  test('a drag anywhere selects what is inside, then goes back to Select', async ({ page }) => {
+    await page.keyboard.press('m');
+    expect(await page.evaluate(() => tool)).toBe('box');
+    await drag(page, [-20, -20], [320, 100]);   // starts on empty space (which pans with Select)
+    let s = await state(page);
+    expect(s.sel).toEqual([1, 2]);
+    expect(await page.evaluate(() => tool)).toBe('select');
+
+    await page.click('.tool[data-tool="box"]');
+    await drag(page, [210, 40], [-20, 300]);   // starting on an object still draws a box; replaces the selection
+    s = await state(page);
+    expect(s.sel).toEqual([3]);
+    expect(s.objects.map(o => [o.x, o.y])).toEqual([[0, 0], [200, 0], [0, 200]]);   // nothing moved
+    noErrors(page);
+  });
+
+  test('Shift adds; a click picks one object; a click on empty space clears', async ({ page }) => {
+    await click(page, 250, 40);
+    await page.keyboard.press('m');
+    await drag(page, [-20, 180], [120, 300], ['Shift']);
+    expect((await state(page)).sel).toEqual([2, 3]);
+    await page.keyboard.press('m');
+    await click(page, 50, 40);
+    expect((await state(page)).sel).toEqual([1]);
+    await page.keyboard.press('m');
+    await click(page, 500, 500);
+    expect((await state(page)).sel).toEqual([]);
+    expect(await page.evaluate(() => tool)).toBe('box');   // nothing selected: the tool stays on
+  });
+
+  test('a box selects whole groups', async ({ page }) => {
+    await page.evaluate(() => { setSel([1, 3]); groupSel(); setSel(null); });
+    await page.keyboard.press('m');
+    await drag(page, [-20, -20], [120, 100]);   // only the first rect is inside
+    expect((await state(page)).sel).toEqual([1, 3]);
+  });
+});

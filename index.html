@@ -274,6 +274,7 @@
 <header>
   <div class="brand"><i></i>Screenshottr</div>
   <button class="tb tool" data-tool="select" title="Select / move (V)"><svg viewBox="0 0 24 24"><path d="M5 3l13 7.5-5.5 1.8L10 18z"/></svg></button>
+  <button class="tb tool" data-tool="box" title="Box select: drag a box to select what's inside, ⇧ adds (M)"><svg viewBox="0 0 24 24"><path d="M4 8V4h4M12 4h2M4 12v2M4 18v2h2M18 4h2v4"/><path d="M12 12l8 3.2-3.4 1.2L15 20z"/></svg></button>
   <button class="tb tool" data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></button>
   <button class="tb tool" data-tool="line" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
   <button class="tb tool" data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
@@ -1022,10 +1023,12 @@ function drawOverlay(c) {
     }
     c.stroke(); c.restore();
   }
-  if (drag && drag.mode === 'marquee' && drag.moved) {   // Shift-drag selection box
+  if (drag && drag.mode === 'marquee' && drag.moved) {   // selection box, and what it would select
     const r = rectOf(drag.start, drag.end);
     c.save(); c.fillStyle = ACCENT; c.globalAlpha = .1; c.fillRect(r.x, r.y, r.w, r.h);
     c.globalAlpha = 1; c.strokeStyle = ACCENT; c.lineWidth = lw; c.strokeRect(r.x, r.y, r.w, r.h);
+    c.globalAlpha = .6;
+    for (const id of boxSelection(r)) { if (isSel(id)) continue; const b = bbox(get(id)), p = 3 / zoom; c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2); }
     c.restore();
   }
   if (selIds.length > 1) {   // several selected: a dashed box around each, no handles
@@ -1864,15 +1867,19 @@ cv.addEventListener('pointerdown', e => {
     if (o && inBox(p, norm(o))) { drag = { mode: 'crop-pan', start: p, orig: clone(o), snap: snapTargets([o]) }; return; }
     endCrop(true);
   }
-  const s = sel();
+  const s = tool !== 'box' && sel();
   if (s) {
     const k = hitHandle(s, p);
     if (k) { drag = { mode: 'handle', k, start: p, orig: clone(s), snap: snapTargets([s]) }; return; }
   }
+  if (tool === 'box') {   // a drag anywhere draws a selection box; Shift adds to the selection
+    drag = { mode: 'marquee', start: p, end: p, hit: hitTest(p), moved: false, add: e.shiftKey, box: true };
+    return;
+  }
   if (tool === 'select') {
     const o = hitTest(p);
     // Shift: click toggles an object in the selection, drag draws a box that adds what it encloses
-    if (e.shiftKey) { drag = { mode: 'marquee', start: p, end: p, hit: o, moved: false }; return; }
+    if (e.shiftKey) { drag = { mode: 'marquee', start: p, end: p, hit: o, moved: false, add: true }; return; }
     // A click selects the object, or its whole group. Clicking one of several selected objects keeps
     // them all, to move together; a click without dragging then selects just it (or its group).
     const g = o && groupIds(o.id);
@@ -1994,6 +2001,11 @@ function keepReachedGuides(b, tol) {
   const l = linesOf(b);
   drag.guides = drag.guides.filter(g => ('x' in g ? l.xs : l.ys).some(v => Math.abs(v - ('x' in g ? g.x : g.y)) <= tol));
 }
+// Ids of the objects entirely inside world rect r, with the rest of their groups.
+function boxSelection(r) {
+  const inside = objects.filter(o => { const b = bbox(o); return b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h; });
+  return [...new Set(inside.flatMap(o => groupIds(o.id)))];
+}
 function rectOf(a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) }; }
 function shiftObj(o, a, dx, dy) {
   if (a.pts) o.pts = a.pts.map((v, i) => v + (i % 2 ? dy : dx));
@@ -2100,11 +2112,11 @@ function finishDrag() {
   }
   if (d.mode === 'marquee') {
     if (d.moved) {
-      const r = rectOf(d.start, d.end);
-      const inside = objects.filter(o => { const b = bbox(o); return b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h; });
-      const add = [...new Set(inside.flatMap(o => groupIds(o.id)))];   // whole groups
-      setSel([...selIds, ...add.filter(id => !isSel(id))]);
-    } else if (d.hit) toggleSel(d.hit.id);
+      const ids = boxSelection(rectOf(d.start, d.end));
+      setSel(d.add ? [...selIds, ...ids.filter(id => !isSel(id))] : ids);
+    } else if (d.hit) d.add ? toggleSel(d.hit.id) : setSel(groupIds(d.hit.id));
+    else if (!d.add) setSel(null);
+    if (d.box && selIds.length) selectMode();   // back to Select, so the selection can be dragged
     refreshPanel(); render(); return;
   }
   if (d.mode === 'move') {
@@ -2279,7 +2291,7 @@ function refreshPanel() {
   const props = $('#props'), title = $('#propsTitle');
   props.innerHTML = '';
   const o = sel();
-  const type = o ? o.type : (tool !== 'select' ? tool : null);
+  const type = o ? o.type : (tool !== 'select' && tool !== 'box' ? tool : null);
   if (base && selIds.length > 1 && tool !== 'canvas') {
     const objs = selObjs(), group = selGroup();
     title.innerHTML = '';
@@ -2581,7 +2593,7 @@ function setTool(t) {
   endCrop(true);
   tool = t;
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
-  if (t !== 'select' && selObjs().some(o => o.type !== t)) setSel(null);
+  if (t !== 'select' && t !== 'box' && selObjs().some(o => o.type !== t)) setSel(null);
   cv.style.cursor = t === 'select' || t === 'canvas' ? 'default' : t === 'text' || t === 'marker' ? 'text' : 'crosshair';
   resetFrameRect();
   updateFrameBox();
@@ -2904,7 +2916,7 @@ const endPan = () => { pan = null; document.body.classList.remove('panning'); };
 stage.addEventListener('pointerup', endPan);
 stage.addEventListener('pointercancel', endPan);
 
-const TOOL_KEYS = { v: 'select', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', d: 'pen', h: 'marker', n: 'step', p: 'redact', c: 'canvas' };
+const TOOL_KEYS = { v: 'select', m: 'box', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', d: 'pen', h: 'marker', n: 'step', p: 'redact', c: 'canvas' };
 document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (!$('#libModal').hidden) {

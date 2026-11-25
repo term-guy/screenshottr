@@ -295,3 +295,33 @@ test('text saved before background opacity existed shows 100%', async ({ page })
   await expect(page.locator('#props .row', { hasText: 'Background opacity' }).locator('input.val')).toHaveValue('100%');
   noErrors(page);
 });
+
+test('interval: draws on its axis, ends resize along it, direction turns it about its middle', async ({ page }) => {
+  await openApp(page);
+  await page.keyboard.press('i');
+  await drag(page, [50, 100], [250, 130]);
+  let o = (await state(page)).objects[0];
+  expect(o.type).toBe('span');
+  expect(o.orient).toBe('h');
+  expect(o.y2).toBe(o.y1);
+  expect(o.x2).toBeCloseTo(250, 0);
+  // drag the right end: only its x follows the pointer
+  await drag(page, [250, 100], [300, 160], ['Alt']);
+  o = (await state(page)).objects[0];
+  expect(o.x2).toBeCloseTo(300, 0);
+  expect(o.y2).toBe(o.y1);
+  expect((await state(page)).last).toBe('Reshape interval');
+  // the panel's direction control makes it vertical, same length and middle
+  await page.locator('#props button[title="v"]').click();
+  o = (await state(page)).objects[0];
+  expect(o.orient).toBe('v');
+  expect(o.x1).toBe(o.x2);
+  expect(o.x1).toBeCloseTo(175, 0);
+  expect(o.y2 - o.y1).toBeCloseTo(250, 0);
+  // the end bars are hit too
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('v');
+  await click(page, 175 + 12, o.y1);
+  expect((await state(page)).sel).toEqual([o.id]);
+  noErrors(page);
+});

@@ -8,7 +8,7 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Infinite canvas**: start an endless canvas from the start screen to arrange screenshots and annotations freely. Paste images into the middle of the view (or drop them where you want them), drag empty space, middle-drag, hold `Space` or scroll (mouse wheel or trackpad, `⇧` for sideways) to pan, use `Ctrl` + mouse wheel or pinch to zoom, and **Fit** (`⌘0`) to see everything. Copy and PNG export cover all objects with a small margin. **Convert to infinite canvas** / **Convert to regular canvas** in the Properties panel (with nothing selected) switches an open document either way; going to regular sizes the canvas to fit all objects with that same margin, and going to infinite removes the canvas edges, so anything cropped off by them becomes visible again
 - **Images are objects**: the screenshot you paste or open, and every image you paste after it, is its own object on the canvas, always at its original 1:1 size. Move, resize (corners keep the aspect ratio; hold `⇧` to stretch), reorder, fade, duplicate, or delete it; the original pixels are kept, so **1:1** returns a resized image to its original size.
 - **Crop images**: select an image and press **Crop**, drag the handles to trim it or drag inside to move the crop window, then `Enter` to apply or `Esc` to cancel. The original pixels are kept, so **Reset crop** brings back the whole image `⇧⌘V` starts a new document from the clipboard instead
-- **Annotation tools**: arrow, line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
+- **Annotation tools**: arrow, interval (`|←→|` between two end bars, horizontal or vertical, for spans like a time period), line, rectangle, ellipse, text, pen, highlighter, and auto-numbered step markers
 - **Pen and highlighter**: draw freehand strokes; the tool stays on so you can keep drawing, and `⇧` draws a straight segment. The highlighter blends with what's below so text under it stays readable, on light and dark backgrounds alike (it picks the blend from where the stroke starts; switch it under **Background** in the panel)
 - **Snap guides**: while moving, objects snap their edges and centres to other objects and to the canvas, with a guide line; resizing snaps the dragged edges (and line or arrow ends) the same way, and cropping an image snaps its crop edges (and, when sliding the crop, its centre) to those same lines, so a trimmed screenshot lines up with what is around it; hold `⌥` / `Alt` to move, resize or crop freely
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
@@ -48,6 +48,7 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Select / move | `V` |
 | Box select | `M` |
 | Arrow | `A` |
+| Interval | `I` |
 | Line | `L` |
 | Rectangle | `R` |
 | Ellipse | `E` |

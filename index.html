@@ -50,7 +50,8 @@
   #dims { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   /* Narrow windows: drop the wordmark, then the button captions (tooltips remain); below that the toolbar wraps. */
   @media (max-width: 1500px) { .brand { font-size: 0; gap: 0; margin-right: 6px; } }
-  @media (max-width: 1360px) { #newBtn, #libBtn, #projBtn, #copyBtn, #saveBtn { font-size: 0; gap: 0; } }
+  @media (max-width: 1440px) { #newBtn, #libBtn, #projBtn, #copyBtn, #saveBtn { font-size: 0; gap: 0; } }
+  @media (max-width: 1260px) { header { gap: 2px; } .tb { padding: 0 6px; } .sep { margin: 0 4px; } }
 
   /* ---------- layout ---------- */
   main { display: grid; grid-template-columns: 1fr 268px; min-height: 0; }
@@ -276,6 +277,7 @@
   <button class="tb tool" data-tool="select" title="Select / move (V)"><svg viewBox="0 0 24 24"><path d="M5 3l13 7.5-5.5 1.8L10 18z"/></svg></button>
   <button class="tb tool" data-tool="box" title="Box select: drag a box to select what's inside, ⇧ adds (M)"><svg viewBox="0 0 24 24"><path d="M4 8V4h4M12 4h2M4 12v2M4 18v2h2M18 4h2v4"/><path d="M12 12l8 3.2-3.4 1.2L15 20z"/></svg></button>
   <button class="tb tool" data-tool="arrow" title="Arrow (A)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></button>
+  <button class="tb tool" data-tool="span" title="Interval: a span |←→| between two bars (I)"><svg viewBox="0 0 24 24"><path d="M3 7v10M21 7v10M3 12h18M7 9l-3 3 3 3M17 9l3 3-3 3"/></svg></button>
   <button class="tb tool" data-tool="line" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
   <button class="tb tool" data-tool="rect" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
   <button class="tb tool" data-tool="ellipse" title="Ellipse (E)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button>
@@ -381,7 +383,7 @@ const FONTS = {
   hand: '"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive',
 };
 const SWATCHES = ['#ff3b30', '#ff9f0a', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2', '#ffffff', '#1c1c1e'];
-const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', pen: 'Pen', marker: 'Highlight', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
+const NAMES = { arrow: 'Arrow', span: 'Interval', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', pen: 'Pen', marker: 'Highlight', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
 const BG_SWATCHES = ['#ffffff', '#f2f2f7', '#d1d1d6', '#1c1c1e', '#000000', '#0a84ff', '#ff3b30', '#ffd60a'];
 const ACCENT = '#4c8dff';
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -389,6 +391,7 @@ const HANDLE = 9;
 
 const DEFAULTS = {
   arrow:   { color: '#ff3b30', width: 5, heads: 'end', headStyle: 'filled', dash: 'solid', opacity: 1 },
+  span:    { color: '#ff3b30', width: 4, orient: 'h', headStyle: 'filled', dash: 'solid', opacity: 1 },
   line:    { color: '#ff3b30', width: 5, dash: 'solid', opacity: 1 },
   rect:    { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', radius: 6, dash: 'solid', opacity: 1 },
   ellipse: { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', dash: 'solid', opacity: 1 },
@@ -402,6 +405,7 @@ const DEFAULTS = {
 };
 const PROPS = {
   arrow:   ['color', 'width', 'heads', 'headStyle', 'dash', 'opacity'],
+  span:    ['color', 'width', 'orient', 'headStyle', 'dash', 'opacity'],
   line:    ['color', 'width', 'dash', 'opacity'],
   rect:    ['color', 'width', 'dash', 'radius', 'fillOn', 'fill', 'opacity'],
   ellipse: ['color', 'width', 'dash', 'fillOn', 'fill', 'opacity'],
@@ -418,6 +422,7 @@ const CTRL = {
   color:     { label: 'Color', kind: 'color' },
   width:     { label: 'Weight', kind: 'range', min: 1, max: 40, step: 1, minFor: { rect: 0, ellipse: 0 }, maxFor: { marker: 80 } },
   heads:     { label: 'Arrowheads', kind: 'seg', options: [['none', headIcon(0, 0)], ['start', headIcon(1, 0)], ['end', headIcon(0, 1)], ['both', headIcon(1, 1)]] },
+  orient:    { label: 'Direction', kind: 'seg', options: [['h', '<svg viewBox="0 0 22 14"><path d="M3 3v8M19 3v8M3 7h16"/></svg>'], ['v', '<svg viewBox="0 0 22 14"><path d="M7 2h8M7 12h8M11 2v10"/></svg>']] },
   headStyle: { label: 'Head style', kind: 'seg', options: [['filled', 'Filled'], ['open', 'Open']] },
   dash:      { label: 'Line style', kind: 'seg', options: [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']] },
   opacity:   { label: 'Opacity', kind: 'range', min: 0.1, max: 1, step: 0.05, fmt: v => Math.round(v * 100) + '%', parse: n => n / 100 },
@@ -473,7 +478,7 @@ function objBounds(pad = 0) {
   if (!objects.length) return null;
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
   for (const o of objects) {
-    const b = bbox(o), q = (o.width || 0) / 2 + (o.type === 'arrow' ? 10 + o.width * 3 : 2);
+    const b = bbox(o), q = (o.width || 0) / 2 + (o.type === 'arrow' || o.type === 'span' ? 10 + o.width * 3 : 2);
     x1 = Math.min(x1, b.x - q); y1 = Math.min(y1, b.y - q); x2 = Math.max(x2, b.x + b.w + q); y2 = Math.max(y2, b.y + b.h + q);
   }
   return { x1: Math.floor(x1 - pad), y1: Math.floor(y1 - pad), x2: Math.ceil(x2 + pad), y2: Math.ceil(y2 + pad) };
@@ -641,7 +646,7 @@ function wrapPara(para, maxW) {
 }
 function bbox(o) {
   switch (o.type) {
-    case 'arrow': case 'line':
+    case 'arrow': case 'line': case 'span':
       return { x: Math.min(o.x1, o.x2), y: Math.min(o.y1, o.y2), w: Math.abs(o.x2 - o.x1), h: Math.abs(o.y2 - o.y1) };
     case 'text': { const L = textLayout(o); return { x: o.x, y: o.y, w: L.w, h: L.h }; }
     case 'step': { const r = o.size / 2; return { x: o.x - r, y: o.y - r, w: o.size, h: o.size }; }
@@ -667,6 +672,10 @@ function hitObj(o, p) {
   switch (o.type) {
     case 'arrow': case 'line':
       return distSeg(p, o.x1, o.y1, o.x2, o.y2) <= o.width / 2 + tol;
+    case 'span': {   // the line or either end bar
+      const r = o.width / 2 + tol, bars = spanBars(o);
+      return distSeg(p, o.x1, o.y1, o.x2, o.y2) <= r || bars.some(b => distSeg(p, ...b) <= r);
+    }
     case 'rect': {
       const b = norm(o), edge = o.width / 2 + tol;
       if (!inBox(p, b, edge)) return false;
@@ -699,7 +708,7 @@ function hitTest(p) {
   return null;
 }
 function handles(o) {
-  if (o.type === 'arrow' || o.type === 'line') return [{ k: 'p1', x: o.x1, y: o.y1 }, { k: 'p2', x: o.x2, y: o.y2 }];
+  if (o.type === 'arrow' || o.type === 'line' || o.type === 'span') return [{ k: 'p1', x: o.x1, y: o.y1 }, { k: 'p2', x: o.x2, y: o.y2 }];
   if (o.type === 'step' || o.type === 'pen' || o.type === 'marker') return [];
   const b = bbox(o);
   if (o.type === 'text') return [{ k: 'se', x: b.x + b.w, y: b.y + b.h }];
@@ -776,6 +785,35 @@ function drawLine(c, o) {
   if (hasE) drawHead(c, x2, y2, ang, hl, w, filled);
   c.lineWidth = w;
   if (hasS) drawHead(c, x1, y1, ang + Math.PI, hl, w, filled);
+}
+// Interval |<--->|: a horizontal or vertical line with an arrowhead at each end pointing out to a bar.
+const spanBarHalf = o => 6 + o.width * 2.5;
+function spanBars(o) {   // [x1, y1, x2, y2] of the two end bars
+  const h = spanBarHalf(o), v = o.orient === 'v';
+  return [[o.x1, o.y1], [o.x2, o.y2]].map(([x, y]) => v ? [x - h, y, x + h, y] : [x, y - h, x, y + h]);
+}
+// Keep an interval on its axis: a horizontal one shares one y, a vertical one one x.
+function constrainSpan(o) { if (o.orient === 'v') o.x2 = o.x1; else o.y2 = o.y1; }
+function drawSpan(c, o) {
+  const { x1, y1, x2, y2, width: w } = o;
+  const len = Math.hypot(x2 - x1, y2 - y1), filled = o.headStyle !== 'open';
+  const ang = Math.atan2(y2 - y1, x2 - x1), cos = Math.cos(ang), sin = Math.sin(ang);
+  const hl = Math.min(10 + w * 3, len * 0.45), back = filled ? hl * 0.75 : 0;
+  const inset = w / 2;   // the tips touch the bars without poking through
+  c.strokeStyle = c.fillStyle = o.color;
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  c.lineWidth = w; c.setLineDash([]);
+  c.beginPath();
+  for (const b of spanBars(o)) { c.moveTo(b[0], b[1]); c.lineTo(b[2], b[3]); }
+  c.stroke();
+  if (len < 1) return;
+  const ax = x1 + cos * inset, ay = y1 + sin * inset, bx = x2 - cos * inset, by = y2 - sin * inset;
+  if (len - 2 * (inset + back) > 0) {   // very short: the two heads meet, no line between them
+    setDash(c, o);
+    c.beginPath(); c.moveTo(ax + cos * back, ay + sin * back); c.lineTo(bx - cos * back, by - sin * back); c.stroke();
+  }
+  c.lineWidth = w; drawHead(c, bx, by, ang, hl, w, filled);
+  c.lineWidth = w; drawHead(c, ax, ay, ang + Math.PI, hl, w, filled);
 }
 function drawText(c, o) {
   const L = textLayout(o);
@@ -978,6 +1016,7 @@ function drawObj(c, o) {
   c.globalAlpha = o.opacity ?? 1;
   switch (o.type) {
     case 'arrow': case 'line': drawLine(c, o); break;
+    case 'span': drawSpan(c, o); break;
     case 'pen': case 'marker': drawStroke(c, o); break;
     case 'rect': {
       const b = norm(o);
@@ -1054,7 +1093,7 @@ function drawOverlay(c) {
   if (!o || (editing && editing.id === o.id)) return;
   c.save();
   c.strokeStyle = ACCENT; c.lineWidth = lw;
-  if (o.type !== 'arrow' && o.type !== 'line') {
+  if (o.type !== 'arrow' && o.type !== 'line' && o.type !== 'span') {
     const b = bbox(o), p = o.type === 'text' || o.type === 'step' ? 3 / zoom : 0;
     c.setLineDash([4 / zoom, 3 / zoom]);
     c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
@@ -1672,7 +1711,7 @@ function contentBounds() {
   if (isInf()) return objBounds(2) || { x1: 0, y1: 0, x2: 1, y2: 1 };
   let x1 = frame.ox, y1 = frame.oy, x2 = frame.ox + base.width, y2 = frame.oy + base.height;
   for (const o of objects) {
-    const b = bbox(o), pad = (o.width || 0) / 2 + (o.type === 'arrow' ? 10 + o.width * 3 : 2);
+    const b = bbox(o), pad = (o.width || 0) / 2 + (o.type === 'arrow' || o.type === 'span' ? 10 + o.width * 3 : 2);
     x1 = Math.min(x1, b.x - pad); y1 = Math.min(y1, b.y - pad);
     x2 = Math.max(x2, b.x + b.w + pad); y2 = Math.max(y2, b.y + b.h + pad);
   }
@@ -1924,7 +1963,7 @@ cv.addEventListener('pointerdown', e => {
     render();
     return;
   }
-  const o = (tool === 'arrow' || tool === 'line')
+  const o = (tool === 'arrow' || tool === 'line' || tool === 'span')
     ? newObj(tool, { x1: p.x, y1: p.y, x2: p.x, y2: p.y })
     : newObj(tool, { x: p.x, y: p.y, w: 0, h: 0 });
   drag = { mode: 'create', start: p, id: o.id };
@@ -2058,8 +2097,9 @@ cv.addEventListener('pointermove', e => {
   if (!o) return;
   if (drag.mode === 'create') {
     if ('x1' in o) {
-      const q = e.shiftKey ? snapAngle(o.x1, o.y1, p.x, p.y) : p;
+      const q = e.shiftKey && o.type !== 'span' ? snapAngle(o.x1, o.y1, p.x, p.y) : p;
       o.x2 = q.x; o.y2 = q.y;
+      if (o.type === 'span') constrainSpan(o);
     } else {
       let w = p.x - o.x, h = p.y - o.y;
       if (e.shiftKey) { const m = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * m; h = Math.sign(h || 1) * m; }
@@ -2067,7 +2107,7 @@ cv.addEventListener('pointermove', e => {
     }
   } else if (drag.mode === 'handle') {
     // Shift on a line end constrains its angle, so it doesn't snap then
-    const q = snapHandle(o, drag.k, p, e.altKey || (e.shiftKey && 'x1' in o));
+    const q = snapHandle(o, drag.k, p, e.altKey || (e.shiftKey && 'x1' in o && o.type !== 'span'));
     applyHandle(o, drag.orig, drag.k, q, e.shiftKey);
     if ('x1' in o) {   // a line end: guides through the point it sits on
       const end = drag.k === 'p1' ? { x: o.x1, y: o.y1 } : { x: o.x2, y: o.y2 };
@@ -2086,6 +2126,12 @@ cv.addEventListener('pointermove', e => {
   render();
 });
 function applyHandle(o, a, k, p, shift) {
+  if (o.type === 'span') {   // an end slides along the interval's axis
+    const v = o.orient === 'v';
+    if (k === 'p1') { if (v) o.y1 = p.y; else o.x1 = p.x; }
+    if (k === 'p2') { if (v) o.y2 = p.y; else o.x2 = p.x; }
+    return;
+  }
   if (k === 'p1') { const q = shift ? snapAngle(a.x2, a.y2, p.x, p.y) : p; o.x1 = q.x; o.y1 = q.y; return; }
   if (k === 'p2') { const q = shift ? snapAngle(a.x1, a.y1, p.x, p.y) : p; o.x2 = q.x; o.y2 = q.y; return; }
   if (o.type === 'text') {
@@ -2187,7 +2233,8 @@ function el(tag, cls, text) {
 function setProp(key, val, commit) {
   const o = sel();
   const type = o ? o.type : tool;
-  if (o) o[key] = val;
+  if (o && o.type === 'span' && key === 'orient' && o.orient !== val) setSpanOrient(o, val);
+  else if (o) o[key] = val;
   if (styles[type] && !CTRL[key]?.noStyle) { styles[type][key] = val; saveStyles(); }
   if (editing) styleEditor();
   render();
@@ -2415,6 +2462,13 @@ function autoWidth(o) {
   delete o.wrapW;
   pushHistory('Text: auto width');
   refreshPanel(); render();
+}
+// Turn an interval between horizontal and vertical, about its middle, keeping its length.
+function setSpanOrient(o, v) {
+  const cx = (o.x1 + o.x2) / 2, cy = (o.y1 + o.y2) / 2, half = Math.hypot(o.x2 - o.x1, o.y2 - o.y1) / 2;
+  o.orient = v;
+  if (v === 'v') { o.x1 = o.x2 = cx; o.y1 = cy - half; o.y2 = cy + half; }
+  else { o.y1 = o.y2 = cy; o.x1 = cx - half; o.x2 = cx + half; }
 }
 function reverseLine(o) {
   [o.x1, o.y1, o.x2, o.y2] = [o.x2, o.y2, o.x1, o.y1];
@@ -2661,6 +2715,9 @@ function objectItems(objs, at) {
       break;
     case 'arrow': case 'line':
       add('Reverse direction', () => reverseLine(o));
+      break;
+    case 'span':
+      add(o.orient === 'v' ? 'Make horizontal' : 'Make vertical', () => { setProp('orient', o.orient === 'v' ? 'h' : 'v', true); refreshPanel(); });
       break;
     case 'rect': case 'ellipse':
       add('Fill', () => { setProp('fillOn', !o.fillOn, true); refreshPanel(); }, { checked: !!o.fillOn });
@@ -2925,7 +2982,7 @@ const endPan = () => { pan = null; document.body.classList.remove('panning'); };
 stage.addEventListener('pointerup', endPan);
 stage.addEventListener('pointercancel', endPan);
 
-const TOOL_KEYS = { v: 'select', m: 'box', a: 'arrow', l: 'line', r: 'rect', e: 'ellipse', t: 'text', d: 'pen', h: 'marker', n: 'step', p: 'redact', c: 'canvas' };
+const TOOL_KEYS = { v: 'select', m: 'box', a: 'arrow', i: 'span', l: 'line', r: 'rect', e: 'ellipse', t: 'text', d: 'pen', h: 'marker', n: 'step', p: 'redact', c: 'canvas' };
 document.addEventListener('keydown', e => {
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (!$('#libModal').hidden) {

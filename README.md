@@ -14,6 +14,8 @@ A fast, single-file screenshot annotator that runs entirely in your browser. Pas
 - **Redaction**: pixelate, blur, or solid-fill sensitive areas
 - **Editable objects**: select, move, resize, restyle, and reorder annotations at any time
 - **Multiple selection**: `⇧`-click to add or remove objects, `⇧`-drag a box to add everything inside it, or `⌘A` for all. Drag any selected object to move them together; nudge, duplicate, reorder, delete, and copy work on the whole selection
+- **Groups**: select two or more objects and press **Group** (in the panel or the right-click menu, or `⌘G`). A group is then selected, moved, copied and duplicated as one; **Ungroup** (`⇧⌘G`) splits it again
+- **Right-click menu**: right-click an object for its own actions (edit text, crop or 1:1 an image, reverse an arrow, toggle a fill, redaction mode) plus cut, copy, paste, duplicate, group / ungroup, order and delete; right-click empty space to paste at that point, select all, add text there, or resize, convert and fit the canvas. On a Mac, `Control`-click works too
 - **Text styling**: font, size, left / center / right alignment, outline, background, padding, and corner radius; drag a text box's handle to set its width and the text word-wraps at the same font size
 - **Precise values**: every slider (font size, opacity, weight…) has a box you can type a value into
 - **Canvas resize and background**: crop or extend the canvas with drag handles and anchor control; pick the canvas background colour (or transparent) from the Properties panel whenever nothing is selected
@@ -59,6 +61,8 @@ It can also be hosted as-is on any static host, such as GitHub Pages.
 | Add / remove object from selection | `⇧`-click |
 | Add objects inside a box to selection | `⇧`-drag |
 | Select all | `⌘A` |
+| Group / ungroup selection | `⌘G` / `⇧⌘G` |
+| Cut selected objects | `⌘X` |
 | Paste annotation, or an image as a new object | `⌘V` |
 | Paste an image as a new document | `⇧⌘V` |
 | Copy image to clipboard (nothing selected) | `⌘C` |
@@ -91,7 +95,7 @@ npx playwright install chromium   # once
 npm test
 ```
 
-They serve the repo with `python3 -m http.server` and cover copy and paste between tabs, multiple selection, snapping, the pen and highlighter, and the Recent popup. Set `CHROMIUM_PATH` to run them with a Chromium you already have.
+They serve the repo with `python3 -m http.server` and cover copy and paste between tabs, multiple selection, groups and the right-click menu, snapping, the pen and highlighter, and the Recent popup. Set `CHROMIUM_PATH` to run them with a Chromium you already have.
 
 ## License
 

@@ -244,6 +244,25 @@
   #hist li.future { opacity: .4; }
   .muted { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
 
+  /* right-click menu */
+  #ctx {
+    position: fixed; z-index: 60; min-width: 210px; padding: 4px; display: flex; flex-direction: column;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  }
+  #ctx[hidden] { display: none; }
+  #ctx button {
+    height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: none; cursor: pointer;
+    display: flex; align-items: center; gap: 16px; text-align: left; font-size: 13px;
+  }
+  #ctx button:hover:not(:disabled), #ctx button:focus-visible { background: var(--accent-soft); outline: none; }
+  #ctx button:disabled { opacity: .4; cursor: default; }
+  #ctx button.danger:hover:not(:disabled) { color: var(--danger); background: rgba(255, 92, 92, .12); }
+  #ctx button .l { flex: 1; }
+  #ctx button .k { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #ctx button .c { width: 12px; flex: none; margin-right: -8px; color: var(--accent); }
+  #ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
+  #ctx .h { padding: 4px 10px 2px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+
   #toast {
     position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
     background: #000c; color: #fff; padding: 9px 16px; border-radius: 9px; transition: opacity .2s, transform .2s; z-index: 50;
@@ -344,6 +363,7 @@
     <div class="libGrid" id="libGrid"></div>
   </div>
 </div>
+<div id="ctx" role="menu" hidden></div>
 <div id="toast"></div>
 
 <script>
@@ -363,6 +383,7 @@ const SWATCHES = ['#ff3b30', '#ff9f0a', '#ffd60a', '#34c759', '#0a84ff', '#bf5af
 const NAMES = { arrow: 'Arrow', line: 'Line', rect: 'Rectangle', ellipse: 'Ellipse', text: 'Text', pen: 'Pen', marker: 'Highlight', step: 'Step', redact: 'Redact', image: 'Image', canvas: 'Canvas' };
 const BG_SWATCHES = ['#ffffff', '#f2f2f7', '#d1d1d6', '#1c1c1e', '#000000', '#0a84ff', '#ff3b30', '#ffd60a'];
 const ACCENT = '#4c8dff';
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const HANDLE = 9;
 
 const DEFAULTS = {
@@ -532,7 +553,48 @@ const isSel = id => selIds.includes(id);
 // "Text" for one object, "3 objects" for several.
 const selLabel = objs => objs.length === 1 ? NAMES[objs[0].type].toLowerCase() : objs.length + ' objects';
 function setSel(ids) { selIds = ids == null ? [] : Array.isArray(ids) ? ids : [ids]; }
-function toggleSel(id) { setSel(isSel(id) ? selIds.filter(x => x !== id) : [...selIds, id]); }
+// Groups: grouped objects share a `group` key and are selected, moved and copied together.
+// Groups are flat: grouping objects that are already grouped makes one new group of them all.
+// The ids of an object's group (just the object when it isn't grouped), in stacking order.
+function groupIds(id) {
+  const o = get(id);
+  return o && o.group ? objects.filter(x => x.group === o.group).map(x => x.id) : [id];
+}
+// Add or remove a whole group (Shift-click).
+function toggleSel(id) {
+  const g = groupIds(id);
+  setSel(isSel(id) ? selIds.filter(x => !g.includes(x)) : [...selIds, ...g.filter(x => !isSel(x))]);
+}
+// The group key when the selection is exactly one whole group, else null.
+function selGroup() {
+  const objs = selObjs(), g = objs.length > 1 && objs[0].group;
+  return g && objs.every(o => o.group === g) && objects.filter(o => o.group === g).length === objs.length ? g : null;
+}
+const canGroup = () => selIds.length > 1 && !selGroup();
+const canUngroup = () => selObjs().some(o => o.group);
+// A group needs two members: drop the key from objects left alone (after deleting the others).
+function cleanGroups() {
+  const n = {};
+  for (const o of objects) if (o.group) n[o.group] = (n[o.group] || 0) + 1;
+  for (const o of objects) if (o.group && n[o.group] < 2) delete o.group;
+}
+const newGroupKey = () => 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function groupSel() {
+  commitEdit(); endCrop(true);
+  if (!canGroup()) return;
+  const objs = selObjs(), g = newGroupKey();
+  for (const o of objs) o.group = g;
+  pushHistory('Group ' + objs.length + ' objects');
+  refreshPanel(); render();
+}
+function ungroupSel() {
+  commitEdit(); endCrop(true);
+  const objs = selObjs().filter(o => o.group);
+  if (!objs.length) return;
+  for (const o of objs) delete o.group;
+  pushHistory('Ungroup ' + selLabel(objs));
+  refreshPanel(); render();
+}
 const clone = o => JSON.parse(JSON.stringify(o));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -948,7 +1010,7 @@ function drawOverlay(c) {
   const hov = hoverId != null && !isSel(hoverId) ? get(hoverId) : null;
   if (hov) {
     c.save(); c.strokeStyle = ACCENT; c.globalAlpha = .6; c.lineWidth = lw;
-    const b = bbox(hov), p = 4 / zoom;
+    const b = unionBox(groupIds(hov.id).map(get)), p = 4 / zoom;
     c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
     c.restore();
   }
@@ -968,7 +1030,14 @@ function drawOverlay(c) {
   }
   if (selIds.length > 1) {   // several selected: a dashed box around each, no handles
     c.save(); c.strokeStyle = ACCENT; c.lineWidth = lw; c.setLineDash([4 / zoom, 3 / zoom]);
-    for (const x of selObjs()) { const b = bbox(x), p = 3 / zoom; c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2); }
+    const objs = selObjs();
+    for (const x of objs) { const b = bbox(x), p = 3 / zoom; c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2); }
+    // a solid box around each group in the selection
+    c.setLineDash([]);
+    for (const g of new Set(objs.map(x => x.group).filter(Boolean))) {
+      const b = unionBox(objects.filter(x => x.group === g)), p = 8 / zoom;
+      c.strokeRect(b.x - p, b.y - p, b.w + p * 2, b.h + p * 2);
+    }
     c.restore();
     return;
   }
@@ -1019,6 +1088,7 @@ function render() {
 
 // ---------- history ----------
 function pushHistory(label, mergeKey) {
+  cleanGroups();
   const state = JSON.stringify({ objects, frame });
   const cur = hist[hIdx];
   if (cur && cur.state === state && cur.base === base) return;
@@ -1780,6 +1850,7 @@ cv.addEventListener('pointerdown', e => {
   // now, while it still targets the current selection.
   if (document.activeElement?.tagName === 'INPUT') document.activeElement.blur();
   if (!base || e.button !== 0) return;
+  if (IS_MAC && e.ctrlKey) return;   // Control-click opens the right-click menu
   const wasEditing = !!editing;
   commitEdit();
   if (tool === 'canvas') return;
@@ -1802,8 +1873,11 @@ cv.addEventListener('pointerdown', e => {
     const o = hitTest(p);
     // Shift: click toggles an object in the selection, drag draws a box that adds what it encloses
     if (e.shiftKey) { drag = { mode: 'marquee', start: p, end: p, hit: o, moved: false }; return; }
-    const collapse = o && isSel(o.id) && selIds.length > 1 ? o.id : null;   // a click without dragging selects just it
-    if (o && !isSel(o.id)) setSel(o.id);   // clicking one of several selected objects keeps them all, to move together
+    // A click selects the object, or its whole group. Clicking one of several selected objects keeps
+    // them all, to move together; a click without dragging then selects just it (or its group).
+    const g = o && groupIds(o.id);
+    const collapse = o && isSel(o.id) && selIds.length > g.length ? g : null;
+    if (o && !isSel(o.id)) setSel(g);
     if (o) { startMove(p, false); drag.collapse = collapse; }
     else if (selIds.length) setSel(null);
     if (!o && isInf()) { drag = { mode: 'pan', cx: e.clientX, cy: e.clientY, vx: viewX, vy: viewY }; document.body.classList.add('panning'); }
@@ -2028,13 +2102,14 @@ function finishDrag() {
     if (d.moved) {
       const r = rectOf(d.start, d.end);
       const inside = objects.filter(o => { const b = bbox(o); return b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h; });
-      setSel([...selIds, ...inside.map(o => o.id).filter(id => !isSel(id))]);
+      const add = [...new Set(inside.flatMap(o => groupIds(o.id)))];   // whole groups
+      setSel([...selIds, ...add.filter(id => !isSel(id))]);
     } else if (d.hit) toggleSel(d.hit.id);
     refreshPanel(); render(); return;
   }
   if (d.mode === 'move') {
     if (d.moved) pushHistory(d.label);
-    else if (d.collapse != null) setSel(d.collapse);
+    else if (d.collapse) setSel(d.collapse);
     refreshPanel(); render(); return;
   }
   const o = sel();
@@ -2206,12 +2281,19 @@ function refreshPanel() {
   const o = sel();
   const type = o ? o.type : (tool !== 'select' ? tool : null);
   if (base && selIds.length > 1 && tool !== 'canvas') {
-    const objs = selObjs();
+    const objs = selObjs(), group = selGroup();
     title.innerHTML = '';
-    title.append(objs.length + ' objects', el('span', 'muted', 'selected'));
-    props.append(el('p', 'hint', 'Drag any of them to move them together. Shift-click adds or removes an object, Shift-drag adds everything inside the box.'));
+    if (group) title.append('Group', el('span', 'muted', objs.length + ' objects'));
+    else title.append(objs.length + ' objects', el('span', 'muted', 'selected'));
+    props.append(el('p', 'hint', group
+      ? 'Grouped objects are selected and moved together. Ungroup to edit them one by one.'
+      : 'Drag any of them to move them together. Shift-click adds or removes an object, Shift-drag adds everything inside the box.'));
     const a = el('div', 'actions');
-    const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); };
+    const mk = (label, fn, cls = '') => { const b = el('button', 'btn ' + cls, label); b.onclick = fn; a.append(b); return b; };
+    const mod = IS_MAC ? '⌘' : 'Ctrl+', shift = IS_MAC ? '⇧' : 'Shift+';
+    if (canGroup()) mk('Group', groupSel, canUngroup() ? '' : 'primary').title = `Group the selected objects (${mod}G)`;
+    if (canUngroup()) mk('Ungroup', ungroupSel, group ? 'primary' : '').title = `Ungroup (${IS_MAC ? shift + mod : mod + shift}G)`;
+    if (a.children.length === 1) a.firstChild.style.gridColumn = '1 / -1';
     mk('Copy', () => copyObjects(selObjs()));
     mk('Duplicate', duplicate);
     mk('Bring to front', () => reorder(1));
@@ -2276,30 +2358,15 @@ function refreshPanel() {
     }
     if (o.type === 'image' && o.iw && o.ih) {
       const k = cropOf(o);
-      mk('1:1', () => {   // the visible part at its original pixel size, keeping the image's centre
-        const b = norm(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-        Object.assign(o, { x: Math.round(cx - k.w / 2), y: Math.round(cy - k.h / 2), w: k.w, h: k.h });
-        pushHistory('Image: 1:1 size');
-        refreshPanel(); render();
-      });
-      const b = a.lastChild, one = Math.abs(o.w) === k.w && Math.abs(o.h) === k.h;
+      mk('1:1', () => imageActualSize(o));
+      const b = a.lastChild, one = isActualSize(o);
       b.title = `Original size ${k.w} × ${k.h}` + (one ? ' (already 1:1)' : '');
       b.disabled = one;
       mk('Crop', () => startCrop(o));
       a.lastChild.title = 'Crop the image';
-      if (o.crop) mk('Reset crop', () => {   // whole image back, at the same scale, cropped part staying put
-        const f = fullRect(o);
-        Object.assign(o, { x: f.x, y: f.y, w: f.w, h: f.h });
-        delete o.crop;
-        pushHistory('Reset crop');
-        refreshPanel(); render();
-      });
+      if (o.crop) mk('Reset crop', () => resetCrop(o));
     }
-    if (o.type === 'text' && o.wrapW) mk('Auto width', () => {
-      delete o.wrapW;
-      pushHistory('Text: auto width');
-      refreshPanel(); render();
-    });
+    if (o.type === 'text' && o.wrapW) mk('Auto width', () => autoWidth(o));
     mk('Duplicate', duplicate);
     mk('Bring to front', () => reorder(1));
     mk('Send to back', () => reorder(-1));
@@ -2309,6 +2376,30 @@ function refreshPanel() {
 }
 
 // ---------- object actions ----------
+const isActualSize = o => { const k = cropOf(o); return Math.abs(o.w) === k.w && Math.abs(o.h) === k.h; };
+function imageActualSize(o) {   // the visible part at its original pixel size, keeping the image's centre
+  const k = cropOf(o), b = norm(o), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  Object.assign(o, { x: Math.round(cx - k.w / 2), y: Math.round(cy - k.h / 2), w: k.w, h: k.h });
+  pushHistory('Image: 1:1 size');
+  refreshPanel(); render();
+}
+function resetCrop(o) {   // whole image back, at the same scale, cropped part staying put
+  const f = fullRect(o);
+  Object.assign(o, { x: f.x, y: f.y, w: f.w, h: f.h });
+  delete o.crop;
+  pushHistory('Reset crop');
+  refreshPanel(); render();
+}
+function autoWidth(o) {
+  delete o.wrapW;
+  pushHistory('Text: auto width');
+  refreshPanel(); render();
+}
+function reverseLine(o) {
+  [o.x1, o.y1, o.x2, o.y2] = [o.x2, o.y2, o.x1, o.y1];
+  pushHistory('Reverse ' + NAMES[o.type].toLowerCase());
+  render();
+}
 function del() {
   commitEdit();
   const objs = selObjs();
@@ -2321,10 +2412,11 @@ function del() {
 // Add copies of `srcs` (from this or another document) shifted by (dx, dy) on top, as one undo
 // step, and select them. Copied steps are renumbered after the existing ones, in order.
 function insertCopies(srcs, dx, dy, label) {
-  const ids = [];
+  const ids = [], groups = {};   // copied groups become new groups of the copies
   for (const src of srcs) {
     const c = clone(src);
     c.id = nextId++;
+    if (c.group) c.group = groups[c.group] || (groups[c.group] = newGroupKey());
     if (c.type === 'step') c.n = objects.reduce((m, o) => o.type === 'step' ? Math.max(m, +o.n || 0) : m, 0) + 1;
     shiftObj(c, c, dx, dy);
     objects.push(c); ids.push(c.id);
@@ -2410,6 +2502,17 @@ async function copyObjects(sel) {
   }
   objClip = { objs, assets: urls, from: INSTANCE, pastes: 0, sig: JSON.stringify(objs) };
   toast('Copied ' + selLabel(objs));
+  return true;
+}
+async function cut() {
+  const objs = selObjs();
+  if (!objs.length) return;
+  if (await copyObjects(objs)) {
+    objects = objects.filter(x => !objs.includes(x));
+    setSel(null);
+    pushHistory('Cut ' + selLabel(objs));
+    refreshPanel(); render();
+  }
 }
 document.addEventListener('copy', e => {
   if (!pendingCopy) return;
@@ -2441,20 +2544,20 @@ function clipFrom(cd) {
   if (objClip && objClip.sig === sig) return objClip;   // pasting the same copy again: keep stepping the offset
   return objClip = { objs: data.objects, assets: data.assets || {}, from: data.from, pastes: 0, sig };
 }
-async function pasteObjects(clip) {
+async function pasteObjects(clip, at) {
   await loadAssets(clip.assets);
   for (const [k, url] of Object.entries(clip.assets)) if (!assetURLs.has(k)) assetURLs.set(k, url);
   const objs = clip.objs.filter(o => o.type !== 'image' || assets.has(o.src));
   if (!objs.length) { toast('Could not paste: the image is missing'); return; }
   commitEdit();
   clip.pastes++;
-  // From this tab: step down-right from the original. From another tab: centre in the view.
+  // At a point (right-click menu): centred there. From this tab: step down-right from the original.
+  // From another tab: centre in the view.
   let dx = 20 * clip.pastes, dy = dx;
-  if (clip.from !== INSTANCE) {
-    const b = objs.map(bbox).reduce((a, r) => ({ x1: Math.min(a.x1, r.x), y1: Math.min(a.y1, r.y), x2: Math.max(a.x2, r.x + r.w), y2: Math.max(a.y2, r.y + r.h) }), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
-    const vc = viewCenter();
-    dx = Math.round(vc.x - (b.x1 + b.x2) / 2) + 20 * (clip.pastes - 1);
-    dy = Math.round(vc.y - (b.y1 + b.y2) / 2) + 20 * (clip.pastes - 1);
+  if (at || clip.from !== INSTANCE) {
+    const b = unionBox(objs), c = at || viewCenter(), step = at ? 0 : 20 * (clip.pastes - 1);
+    dx = Math.round(c.x - (b.x + b.w / 2)) + step;
+    dy = Math.round(c.y - (b.y + b.h / 2)) + step;
   }
   insertCopies(objs, dx, dy, 'Paste');
 }
@@ -2490,6 +2593,165 @@ function selectMode() {
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === 'select'));
   cv.style.cursor = 'default';
   refreshPanel();
+}
+
+// ---------- right-click menu ----------
+// Right-clicking an object selects it (or its group) unless it is already selected, then offers
+// actions for what is selected: its own (edit text, crop, fill, ...), then clipboard, group and
+// order. Right-clicking empty space offers paste and canvas actions.
+const ctxEl = $('#ctx');
+// Shortcut labels: ⌘C / ⇧⌘G on a Mac, Ctrl+C / Ctrl+Shift+G elsewhere.
+const sc = (k, shift) => IS_MAC ? (shift ? '⇧' : '') + '⌘' + k : 'Ctrl+' + (shift ? 'Shift+' : '') + k;
+function hideCtx() { ctxEl.hidden = true; }
+// items: { label, fn, key?, danger?, disabled?, checked? } or '-' for a separator.
+function showCtx(cx, cy, items) {
+  items = items.filter((it, i) => it !== '-' || (i > 0 && items[i - 1] !== '-'));
+  while (items[items.length - 1] === '-') items.pop();
+  const checks = items.some(it => it.checked !== undefined);
+  ctxEl.innerHTML = '';
+  for (const it of items) {
+    if (it === '-') { ctxEl.append(el('hr')); continue; }
+    const b = el('button', it.danger ? 'danger' : '');
+    b.setAttribute('role', 'menuitem');
+    b.disabled = !!it.disabled;
+    if (checks) b.append(el('span', 'c', it.checked ? '✓' : ''));
+    b.append(el('span', 'l', it.label), el('span', 'k', it.key || ''));
+    b.onclick = () => { hideCtx(); it.fn(); };
+    ctxEl.append(b);
+  }
+  ctxEl.style.left = ctxEl.style.top = '0px';
+  ctxEl.hidden = false;
+  const r = ctxEl.getBoundingClientRect();
+  ctxEl.style.left = clamp(cx, 4, innerWidth - r.width - 4) + 'px';
+  ctxEl.style.top = (cy + r.height > innerHeight - 4 ? Math.max(4, cy - r.height) : cy) + 'px';
+}
+function objectItems(objs, at) {
+  const o = objs.length === 1 ? objs[0] : null, items = [];
+  const add = (label, fn, opts) => items.push({ label, fn, ...opts });
+  if (o) switch (o.type) {
+    case 'text':
+      add('Edit text', () => startEdit(o, false), { key: '↵' });
+      if (o.wrapW) add('Auto width', () => autoWidth(o));
+      break;
+    case 'image':
+      if (o.iw && assets.has(o.src)) add('Crop', () => startCrop(o));
+      if (o.crop) add('Reset crop', () => resetCrop(o));
+      if (o.iw && o.ih) add('Actual size (1:1)', () => imageActualSize(o), { disabled: isActualSize(o) });
+      break;
+    case 'arrow': case 'line':
+      add('Reverse direction', () => reverseLine(o));
+      break;
+    case 'rect': case 'ellipse':
+      add('Fill', () => { setProp('fillOn', !o.fillOn, true); refreshPanel(); }, { checked: !!o.fillOn });
+      break;
+    case 'redact':
+      for (const [m, label] of CTRL.mode.options) add(label, () => { setProp('mode', m, true); refreshPanel(); }, { checked: o.mode === m });
+      break;
+  }
+  items.push('-');
+  add('Cut', cut, { key: sc('X') });
+  add('Copy', () => copyObjects(selObjs()), { key: sc('C') });
+  add('Paste', () => pasteFromMenu(at), { key: sc('V') });
+  add('Duplicate', duplicate, { key: sc('D') });
+  items.push('-');
+  if (canGroup()) add('Group', groupSel, { key: sc('G') });
+  if (canUngroup()) add('Ungroup', ungroupSel, { key: sc('G', true) });
+  items.push('-');
+  add('Bring to front', () => reorder(1), { key: ']' });
+  add('Send to back', () => reorder(-1), { key: '[' });
+  items.push('-');
+  add('Delete', del, { key: IS_MAC ? '⌫' : 'Del', danger: true });
+  return items;
+}
+function canvasItems(at) {   // `at`: the world point right-clicked on the canvas, or null outside it
+  const items = [], add = (label, fn, opts) => items.push({ label, fn, ...opts });
+  add('Paste', () => pasteFromMenu(at), { key: sc('V') });
+  add('Select all', selectAll, { key: sc('A'), disabled: !objects.length });
+  if (at) {
+    items.push('-');
+    add('Add text here', () => {
+      const st = styles.text;
+      startEdit(newObj('text', { x: at.x - st.padding, y: at.y - st.fontSize * 0.625 - st.padding, text: '' }), true);
+      selectMode();
+    });
+  }
+  items.push('-');
+  if (!isInf()) add('Resize canvas…', () => setTool('canvas'), { key: 'C' });
+  add(isInf() ? 'Convert to regular canvas' : 'Convert to infinite canvas', convertCanvas);
+  items.push('-');
+  add('Fit to window', fit, { key: sc('0') });
+  add('Actual size (100%)', () => zoomTo(1), { key: sc('1') });
+  return items;
+}
+function cropItems(o) {
+  return [
+    { label: 'Apply crop', fn: () => endCrop(true), key: '↵' },
+    { label: 'Cancel crop', fn: () => endCrop(false), key: 'Esc' },
+    { label: 'Whole image', fn: () => { setCropRect(o, fullRect(o), -Infinity, -Infinity, Infinity, Infinity); refreshPanel(); render(); }, disabled: !o.crop },
+  ];
+}
+// Paste from the system clipboard (objects, an image or text), centred at `at` when given.
+// Falls back to the last objects copied in this tab when the clipboard can't be read.
+async function pasteFromMenu(at) {
+  let items = null;
+  try { items = await navigator.clipboard.read(); } catch (e) {}
+  if (items) {
+    const data = {};
+    for (const it of items) for (const t of it.types) if (!(t in data)) data[t] = await it.getType(t);
+    const html = data['text/html'] ? await data['text/html'].text() : '';
+    const plain = data['text/plain'] ? await data['text/plain'].text() : '';
+    const clip = clipFrom({ getData: t => t === 'text/html' ? html : t === 'text/plain' ? plain : '' });
+    if (clip) return pasteObjects(clip, at);
+    const img = Object.keys(data).find(t => t.startsWith('image/'));
+    if (img) return addImageObject(data[img], 'Paste image', at);
+    if (plain) return pasteText(plain, at);
+  }
+  if (objClip) return pasteObjects(objClip, at);
+  toast(items ? 'Nothing to paste' : `Press ${sc('V')} to paste`);
+}
+stage.addEventListener('contextmenu', e => {
+  if (!base || e.target.closest('#editor')) return;   // the text editor keeps the browser's menu
+  e.preventDefault();
+  if (drag) return;
+  commitEdit();
+  const p = clientToWorld(e.clientX, e.clientY);
+  if (cropping) {
+    const o = get(cropping.id);
+    if (o && inBox(p, norm(o))) { showCtx(e.clientX, e.clientY, cropItems(o)); return; }
+    endCrop(true);
+  }
+  const onCanvas = e.target === cv && tool !== 'canvas' && (isInf() || inBox(p, { x: 0, y: 0, w: frame.w, h: frame.h }));
+  const o = onCanvas && hitTest(p);
+  hoverId = null;
+  if (o) {
+    if (!isSel(o.id)) setSel(groupIds(o.id));
+    if (tool !== 'select') selectMode();
+  } else setSel(null);
+  refreshPanel(); render();
+  showCtx(e.clientX, e.clientY, o ? objectItems(selObjs(), p) : canvasItems(onCanvas ? p : null));
+});
+// Any press outside the menu closes it; on the canvas that press does nothing else.
+document.addEventListener('pointerdown', e => {
+  if (ctxEl.hidden || ctxEl.contains(e.target)) return;
+  hideCtx();
+  if (e.target === cv && e.button === 0) e.stopPropagation();
+}, true);
+ctxEl.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('wheel', hideCtx, { passive: true });
+window.addEventListener('blur', hideCtx);
+window.addEventListener('resize', hideCtx);
+function ctxKey(e) {   // keyboard in the open menu: arrows move, Enter / Space choose, Esc closes
+  if (e.key === 'Escape') { e.preventDefault(); hideCtx(); return true; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const bs = [...ctxEl.querySelectorAll('button:not(:disabled)')], i = bs.indexOf(document.activeElement);
+    const n = bs.length, j = i < 0 ? (e.key === 'ArrowDown' ? 0 : n - 1) : (i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+    if (n) bs[j].focus();
+    return true;
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && ctxEl.contains(document.activeElement)) return true;
+  hideCtx();
+  return false;
 }
 
 // ---------- wiring ----------
@@ -2559,16 +2821,17 @@ document.addEventListener('paste', e => {
   }
   pasteAsNew = false;
   const text = e.clipboardData && e.clipboardData.getData('text/plain');
-  if (text && base) {
-    e.preventDefault();
-    const vc = viewCenter();
-    const x = isInf() ? vc.x : clamp(vc.x, 0, frame.w - 50);
-    const y = isInf() ? vc.y : clamp(vc.y, 0, frame.h - 50);
-    newObj('text', { x, y, text });
-    pushHistory('Paste text');
-    selectMode(); render();
-  }
+  if (text && base) { e.preventDefault(); pasteText(text); }
 });
+function pasteText(text, at) {
+  commitEdit();
+  const vc = at || viewCenter();
+  const x = isInf() ? vc.x : clamp(vc.x, 0, frame.w - 50);
+  const y = isInf() ? vc.y : clamp(vc.y, 0, frame.h - 50);
+  newObj('text', { x, y, text });
+  pushHistory('Paste text');
+  selectMode(); render();
+}
 window.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('dragging'); });
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
 window.addEventListener('drop', e => {
@@ -2648,6 +2911,7 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') menuOpen() ? closeMenus() : closeLibrary();
     return;
   }
+  if (!ctxEl.hidden && ctxKey(e)) return;
   if (e.key === 'Escape' && menuOpen()) { e.preventDefault(); closeMenus(); return; }
   if (mod && k === 'o') { e.preventDefault(); commitEdit(); $('#fileInput').click(); return; }
   if (mod && e.shiftKey && k === 'v') { pasteAsNew = true; setTimeout(() => { pasteAsNew = false; }, 1000); }   // the paste event follows
@@ -2668,7 +2932,12 @@ document.addEventListener('keydown', e => {
     selIds.length ? copyObjects(selObjs()) : copyImage();
     return;
   }
+  if (mod && k === 'x') {
+    if (String(window.getSelection()) || !selIds.length) return;
+    e.preventDefault(); cut(); return;
+  }
   if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+  if (mod && k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel(); return; }
   if (mod && k === 'a' && base) { e.preventDefault(); selectAll(); return; }
   if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); return; }
   if (mod && k === '-') { e.preventDefault(); zoomStep(-1); return; }

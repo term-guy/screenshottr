@@ -393,7 +393,7 @@ const DEFAULTS = {
   rect:    { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', radius: 6, dash: 'solid', opacity: 1 },
   ellipse: { color: '#ff3b30', width: 5, fillOn: false, fill: '#ffd60a', dash: 'solid', opacity: 1 },
   text:    { color: '#ffffff', fontSize: 28, fontFamily: 'system', bold: true, italic: false, underline: false, strike: false,
-             align: 'left', outline: false, bgOn: true, bgColor: '#ff3b30', padding: 8, radius: 6, opacity: 1 },
+             align: 'left', outline: false, bgOn: true, bgColor: '#ff3b30', bgOpacity: 1, padding: 8, radius: 6, opacity: 1 },
   step:    { color: '#ff3b30', textColor: '#ffffff', size: 40, opacity: 1 },
   pen:     { color: '#ff3b30', width: 4, opacity: 1 },
   marker:  { color: '#ffd60a', width: 22, opacity: 0.5 },
@@ -405,7 +405,7 @@ const PROPS = {
   line:    ['color', 'width', 'dash', 'opacity'],
   rect:    ['color', 'width', 'dash', 'radius', 'fillOn', 'fill', 'opacity'],
   ellipse: ['color', 'width', 'dash', 'fillOn', 'fill', 'opacity'],
-  text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'padding', 'radius', 'opacity'],
+  text:    ['color', 'fontSize', 'fontFamily', 'format', 'align', 'outline', 'bgOn', 'bgColor', 'bgOpacity', 'padding', 'radius', 'opacity'],
   step:    ['n', 'color', 'textColor', 'size', 'opacity'],
   pen:     ['color', 'width', 'opacity'],
   marker:  ['color', 'width', 'opacity', 'blend'],
@@ -431,6 +431,8 @@ const CTRL = {
   outline:   { label: 'Outline', kind: 'toggle' },
   bgOn:      { label: 'Background', kind: 'toggle' },
   bgColor:   { label: 'Background color', kind: 'color', showIf: o => o.bgOn },
+  bgOpacity: { label: 'Background opacity', kind: 'range', min: 0, max: 1, step: 0.05, def: 1, showIf: o => o.bgOn,
+               fmt: v => Math.round(v * 100) + '%', parse: n => n / 100 },
   padding:   { label: 'Padding', kind: 'range', min: 0, max: 48, step: 1, showIf: o => o.bgOn },
   n:         { label: 'Number', kind: 'number', noStyle: true },
   textColor: { label: 'Number color', kind: 'color' },
@@ -736,6 +738,7 @@ function setDash(c, o) {
   const w = Math.max(o.width, 1);
   c.setLineDash(o.dash === 'dashed' ? [w * 2.5, w * 2] : o.dash === 'dotted' ? [0.01, w * 2] : []);
 }
+const withAlpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`; };
 function contrast(hex) {
   const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6 ? '#000000' : '#ffffff';
@@ -777,9 +780,12 @@ function drawLine(c, o) {
 function drawText(c, o) {
   const L = textLayout(o);
   if (o.bgOn) {
+    const alpha = c.globalAlpha;
     c.fillStyle = o.bgColor;
+    c.globalAlpha = alpha * (o.bgOpacity ?? 1);   // the background's own opacity, on top of the object's
     roundRectPath(c, o.x, o.y, L.w, L.h, o.radius);
     c.fill();
+    c.globalAlpha = alpha;
   }
   c.font = fontOf(o);
   c.textBaseline = 'middle';
@@ -1790,7 +1796,7 @@ function styleEditor() {
   s.padding = o.padding * z + 'px';
   s.textAlign = o.align || 'left';
   s.color = o.color;
-  s.background = o.bgOn ? o.bgColor : 'transparent';
+  s.background = o.bgOn ? withAlpha(o.bgColor, o.bgOpacity ?? 1) : 'transparent';
   s.borderRadius = (o.bgOn ? o.radius * z : 0) + 'px';
   s.textDecoration = [o.underline && 'underline', o.strike && 'line-through'].filter(Boolean).join(' ') || 'none';
   s.opacity = o.opacity;
@@ -2215,10 +2221,11 @@ function buildControl(key, t) {
       const min = d.minFor && t.type in d.minFor ? d.minFor[t.type] : d.min;
       const max = d.maxFor && t.type in d.maxFor ? d.maxFor[t.type] : d.max;
       Object.assign(inp, { type: 'range', min, max, step: d.step });
-      inp.value = t[key];
+      const cur = t[key] ?? d.def;   // objects saved before the option existed
+      inp.value = cur;
       // Editable value box: type a number and press Enter (or leave the field) to apply.
       const out = el('input', 'val');
-      Object.assign(out, { type: 'text', value: fmt(t[key]), spellcheck: false, autocomplete: 'off' });
+      Object.assign(out, { type: 'text', value: fmt(cur), spellcheck: false, autocomplete: 'off' });
       inp.oninput = () => { out.value = fmt(+inp.value); setProp(key, +inp.value, false); };
       inp.onchange = () => setProp(key, +inp.value, true);
       const applyTyped = () => {
@@ -2226,7 +2233,7 @@ function buildControl(key, t) {
         if (!isFinite(n)) { out.value = fmt(+inp.value); return; }
         const v = clamp(d.parse ? d.parse(n) : n, +min, d.maxIn ?? max);
         inp.value = v; out.value = fmt(v);
-        if (v !== t[key]) setProp(key, v, true);
+        if (v !== cur) setProp(key, v, true);
       };
       out.onfocus = () => out.select();
       out.onblur = applyTyped;

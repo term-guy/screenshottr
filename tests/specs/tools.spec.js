@@ -257,3 +257,41 @@ test('arrow styles are remembered across reloads', async ({ page }) => {
   const s = await page.evaluate(() => styles.arrow);
   expect(s).toMatchObject({ color: '#0a84ff', heads: 'both' });
 });
+
+test('text background opacity: panel slider, drawn see-through, text stays opaque', async ({ page }) => {
+  await openApp(page, 'regular');
+  await page.evaluate(() => { frame.bg = '#ffffff'; rebuildPage(); });
+  await addObjects(page, [['text', { x: 100, y: 100, text: 'MMMM', bgColor: '#000000', fontSize: 40, padding: 20, color: '#ff0000' }]]);
+  await page.evaluate(() => { setSel(1); refreshPanel(); });
+  const row = page.locator('#props .row', { hasText: 'Background opacity' });
+  await expect(row.locator('input.val')).toHaveValue('100%');
+  await row.locator('input.val').fill('40');
+  await row.locator('input.val').press('Enter');
+  const s = await state(page);
+  expect(s.objects[0].bgOpacity).toBe(0.4);
+  expect(s.last).toBe('Text: background opacity');
+  const px = await page.evaluate(() => {
+    const c = exportCanvas().getContext('2d');
+    const bg = c.getImageData(105, 105, 1, 1).data;   // padding: background only
+    const o = objects[0], L = textLayout(o);
+    let red = 0;   // the text itself keeps full opacity
+    const d = c.getImageData(o.x + o.padding, o.y + o.padding, L.w - o.padding * 2, L.h - o.padding * 2).data;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 240 && d[i + 1] < 15 && d[i + 2] < 15) red++;
+    return { bg: [...bg.slice(0, 3)], red };
+  });
+  expect(px.bg[0]).toBeGreaterThan(145);   // white under 40% black ≈ 153
+  expect(px.bg[0]).toBeLessThan(160);
+  expect(px.red).toBeGreaterThan(50);
+  // turning the background off hides the control
+  await page.locator('#props .row', { hasText: /^Background$/ }).locator('.switch').click();
+  await expect(page.locator('#props .row', { hasText: 'Background opacity' })).toHaveCount(0);
+  noErrors(page);
+});
+
+test('text saved before background opacity existed shows 100%', async ({ page }) => {
+  await openApp(page);
+  await addObjects(page, [['text', { x: 0, y: 0, text: 'old' }]]);
+  await page.evaluate(() => { delete objects[0].bgOpacity; setSel(1); refreshPanel(); });
+  await expect(page.locator('#props .row', { hasText: 'Background opacity' }).locator('input.val')).toHaveValue('100%');
+  noErrors(page);
+});
